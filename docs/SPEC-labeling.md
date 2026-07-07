@@ -158,7 +158,11 @@ pwr_offset: tx_dbm known (WSPR) → (50 − tx_dbm)        (normalize to 100 W =
 - **Training set**: all positives; negatives downsampled uniformly at random
   to **3:1 negative:positive per (band, UTC date) stratum** (keep all if
   fewer). Every row carries `sample_weight = 1/sampling_rate` (positives:
-  1.0) so unbiased rates are recoverable. RNG: PCG64 seeded with
+  1.0) so unbiased rates are recoverable. **Training objectives AND any
+  post-hoc calibrator (isotonic etc.) MUST consume `sample_weight`** — the
+  per-stratum sampling rate varies (strata below 3:1 keep everything), so an
+  unweighted fit distorts base rates non-uniformly and miscalibrates
+  P(open). RNG: PCG64 seeded with
   `sha256(f"{band}|{date}") & 0xFFFFFFFF` — deterministic across
   implementations.
 - **Evaluation**: the FULL labeled set, never sampled.
@@ -197,9 +201,20 @@ label property — labels are stored once, not per horizon.
 
 ### Leakage (hard rules)
 
-1. Autoregressive features: max lookback **≤ 48 h** (current max used: 24 h).
-   Blocked CV gap = `max(48h, max feature lookback)`. Adding a feature with
-   longer lookback MUST widen the gap in `eval/splits.py`.
+0. Availability buffer (train/serve skew, see docs/REVIEW-FINDINGS.md R1):
+   ALL autoregressive features are computed over spots with
+   `ts ≤ t_pred − Δ_avail`, **Δ_avail = 5 min**, identically in training and
+   serving — training features must be a faithful stand-in for what the live
+   system can actually see.
+1. Autoregressive features: max lookback **≤ 48 h** (current max used: 24 h),
+   measured from **prediction time** (`window_start − horizon`), never from the
+   window itself. Total reach behind a labeled window is therefore
+   `horizon + lookback`; blocked CV gap = `max(48h, max horizon + max
+   AR-feature lookback)` (currently 24 h + 24 h = 48 h — at the bound).
+   Adding a longer-lookback feature or a longer horizon MUST widen the gap in
+   `eval/splits.py`. (Exogenous space-weather series are exempt from the
+   horizon+lookback sum — they are not derived from spots — but must still be
+   as-of prediction time per rule 4.)
 2. Climatology baseline, data-density `confidence` tiers, per-mode SNR offset
    refinements, isotonic calibrators: fitted on train folds only.
 3. Receiver-uptime tables are window-local (±30 min) label infrastructure —

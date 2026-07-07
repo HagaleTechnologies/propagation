@@ -26,8 +26,9 @@ For each path-cell and 15-minute window `t`, at horizons
    (dx_call, de_call) report in the window. Class probabilities, properly
    calibrated, not just labels.
 2. **Expected SNR** (secondary): median reported SNR for the window, regression,
-   trained only on open windows. Mode-normalized (see §4.4) so FT8 at −18 dB and
-   CW at +6 dB land on a comparable scale.
+   trained only on open windows. Mode-normalized (normative offsets in
+   docs/SPEC-labeling.md §4.4) so FT8 at −18 dB and CW at +6 dB land on a
+   comparable scale.
 
 `h=0` is a true *nowcast*: given partial real-time observations (spots seen in
 the last 15–60 min elsewhere on the band/region) infer current openness of
@@ -110,7 +111,9 @@ lake/
   spots/            band=20m/date=2026-07-06/*.parquet
   receiver_uptime/  band=20m/date=2026-07-06/*.parquet
   space_weather/    date=2026-07-06/*.parquet
-  labels/           horizon=0/band=20m/date=…/*.parquet
+  labels/           band=20m/date=…/*.parquet   # stored once; horizon is a
+                                                # training-time join offset
+                                                # (SPEC-labeling §4.5)
 ```
 
 Common spot schema (superset of all sources; nullable where a source lacks it):
@@ -181,10 +184,12 @@ Per (path-cell, window, horizon):
    3h/24h; same for the reverse path, adjacent cells, adjacent bands (one band
    up/down — MUF is sliding); same-cell-same-hour-yesterday; band-wide global
    activity (controls for contest weekends vs. dead Tuesdays).
-6. **Mode normalization** (§1.2): per-mode SNR offsets to a common reference
+6. **Mode normalization** (normative: docs/SPEC-labeling.md §4.4): per-mode
+   SNR offsets to a common reference
    (decision: normalize to "FT8-equivalent dB" with fixed published offsets;
    revisit empirically). `tx_dbm` used where present (WSPR) to normalize for
-   power.
+   power. Autoregressive median-SNR features (item 5) use the same
+   FT8-equivalent scale.
 
 ## 5. Modeling ladder
 
@@ -213,7 +218,9 @@ moving on.
 ## 6. Evaluation
 
 - **Splits**: blocked time-series CV — train on months `[t0, t1)`, validate on
-  `[t1+gap, t2)`, with a ≥48h gap so autoregressive features can't leak.
+  `[t1+gap, t2)`, with gap ≥ max horizon + max autoregressive lookback (≥48h;
+  normative rule in docs/SPEC-labeling.md §6) so autoregressive features can't
+  leak.
   Multiple folds across seasons and Kp regimes. **No random splits, ever.**
 - **Metrics**: Brier score and log-loss (proper scoring, headline), PR-AUC
   (openness is heavily imbalanced on marginal bands), reliability diagrams
@@ -239,7 +246,13 @@ Fly.io later).
 The public artifact is a **versioned JSON prediction surface**, defined in
 `contracts/prediction-surface.v1.schema.json` in this repo (following the
 dispensa cross-repo contract pattern used across Tony's ecosystem; if cqdx
-formally adopts it, the contract can be mirrored/promoted into dispensa):
+formally adopts it, the contract can be mirrored/promoted into dispensa).
+
+> **Note:** the sketch below is illustrative only and predates the normative
+> schema, which uses a **columnar encoding** (parallel arrays, integer
+> `p_open_pct`, integer confidence tiers, `horizons_s`, required
+> `valid_from`/`valid_until`/`reference`) — see the schema file and
+> docs/SPEC-contract-notes.md for the real wire format and why.
 
 ```jsonc
 {
