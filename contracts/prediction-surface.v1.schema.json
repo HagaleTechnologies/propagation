@@ -1,0 +1,156 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/thagale/propagation/contracts/prediction-surface.v1.schema.json",
+  "title": "HF propagation prediction surface v1",
+  "description": "Batch-published nowcast/forecast of HF path-cell openness and SNR. Columnar encoding: every array under `columns` has exactly `n_cells` elements; element i across all columns describes one path-cell. Per-horizon columns are arrays of `n_cells` arrays, each of length `horizons_s.length`. Consumers MUST ignore unknown additional properties (additive evolution is allowed within v1). See docs/SPEC-contract-notes.md.",
+  "type": "object",
+  "required": [
+    "schema",
+    "generated_at",
+    "valid_from",
+    "valid_until",
+    "model",
+    "reference",
+    "horizons_s",
+    "n_cells",
+    "columns"
+  ],
+  "properties": {
+    "schema": {
+      "const": "propagation.prediction-surface.v1"
+    },
+    "generated_at": {
+      "type": "string",
+      "format": "date-time",
+      "description": "UTC time the surface was generated."
+    },
+    "valid_from": {
+      "type": "string",
+      "format": "date-time",
+      "description": "Start of the 15-minute window this surface's h=0 predictions describe (UTC, minute in {0,15,30,45})."
+    },
+    "valid_until": {
+      "type": "string",
+      "format": "date-time",
+      "description": "Time after which consumers MUST treat the surface as stale (normally valid_from + 30 minutes)."
+    },
+    "model": {
+      "type": "object",
+      "required": ["id", "version", "trained_through"],
+      "properties": {
+        "id": {
+          "type": "string",
+          "description": "Model family identifier, e.g. 'climatology', 'gbt-m2'.",
+          "examples": ["gbt-m2"]
+        },
+        "version": {
+          "type": "string",
+          "description": "Model artifact version, e.g. '2026.07.03'."
+        },
+        "trained_through": {
+          "type": "string",
+          "format": "date",
+          "description": "Last UTC date of training data."
+        }
+      },
+      "additionalProperties": true
+    },
+    "reference": {
+      "type": "object",
+      "description": "Conditions all predictions are normalized to.",
+      "required": ["cell_scheme", "snr"],
+      "properties": {
+        "cell_scheme": {
+          "const": "maidenhead-field",
+          "description": "Path-cell granularity: 2-character Maidenhead fields, directional tx->rx."
+        },
+        "snr": {
+          "const": "ft8eq-2500hz-100w",
+          "description": "SNR values are FT8-equivalent dB: 2500 Hz noise reference bandwidth, normalized to 100 W (50 dBm) transmit power per SPEC-labeling.md section 4.4."
+        }
+      },
+      "additionalProperties": true
+    },
+    "horizons_s": {
+      "type": "array",
+      "minItems": 1,
+      "uniqueItems": true,
+      "items": {
+        "type": "integer",
+        "minimum": 0,
+        "maximum": 86400
+      },
+      "description": "Forecast horizons in seconds from valid_from, ascending. v1 canonical set: [0, 3600, 10800, 21600, 43200, 86400].",
+      "examples": [[0, 3600, 10800, 21600, 43200, 86400]]
+    },
+    "n_cells": {
+      "type": "integer",
+      "minimum": 0,
+      "description": "Number of path-cells; the length of every array in `columns`."
+    },
+    "columns": {
+      "type": "object",
+      "required": ["tx_field", "rx_field", "band", "p_open_pct", "confidence"],
+      "properties": {
+        "tx_field": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "pattern": "^[A-R]{2}$"
+          },
+          "description": "Transmit-side Maidenhead field per cell."
+        },
+        "rx_field": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "pattern": "^[A-R]{2}$"
+          },
+          "description": "Receive-side Maidenhead field per cell."
+        },
+        "band": {
+          "type": "array",
+          "items": {
+            "enum": ["160m", "80m", "60m", "40m", "30m", "20m", "17m", "15m", "12m", "10m", "6m"]
+          },
+          "description": "Band per cell."
+        },
+        "p_open_pct": {
+          "type": "array",
+          "items": {
+            "type": "array",
+            "items": {
+              "type": ["integer", "null"],
+              "minimum": 0,
+              "maximum": 100
+            }
+          },
+          "description": "Calibrated P(open) as integer percent, one inner array per cell with one entry per horizon. null = model abstains for that horizon."
+        },
+        "snr_db_ft8eq_p50": {
+          "type": "array",
+          "items": {
+            "type": "array",
+            "items": {
+              "type": ["integer", "null"],
+              "minimum": -40,
+              "maximum": 60
+            }
+          },
+          "description": "Median expected SNR (FT8-equivalent dB, integer) per cell per horizon. null where P(open) is low or the SNR model abstains. Optional column."
+        },
+        "confidence": {
+          "type": "array",
+          "items": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 2
+          },
+          "description": "Data-density tier per cell: 0=low, 1=medium, 2=high. Computed from training-data label density for the cell (train folds only)."
+        }
+      },
+      "additionalProperties": true
+    }
+  },
+  "additionalProperties": true
+}
