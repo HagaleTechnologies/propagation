@@ -1,0 +1,4 @@
+schema = "wiki-config/v1"
+repo = "propagation"
+# public | private
+visibility = "private"

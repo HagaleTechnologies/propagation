@@ -1,0 +1,175 @@
+{
+  "generated_at": "2026-07-07T05:51:02Z",
+  "head_commit": "5c2dac7",
+  "pages": [
+    {
+      "hash": "sha256:16964996ec0ce3981c1dc68dd6c3cda6f2a8ef7ea40640a3af80827dcb7f85fc",
+      "id": "decision-monitor-normalized-negatives",
+      "kind": "decision-digest",
+      "links": [
+        "overview",
+        "gotcha-eval-rules"
+      ],
+      "locked": false,
+      "maintainer": "agent",
+      "path": "pages/decision-monitor-normalized-negatives.md",
+      "sources": [
+        "ARCHITECTURE.md",
+        "docs/SPEC-labeling.md"
+      ],
+      "status": "current",
+      "title": "Why does this repo use monitor-normalized negative sampling?",
+      "verified_commit": "5c2dac7",
+      "verified_date": "2026-07-07",
+      "visibility": "private"
+    },
+    {
+      "hash": "sha256:175b0db526eba0aebe2b7015eb736b39eeb160dea82de0bbc6b654b92e2c93e7",
+      "id": "decision-p533-baseline",
+      "kind": "decision-digest",
+      "links": [
+        "overview",
+        "gotcha-open-closed-boundary"
+      ],
+      "locked": false,
+      "maintainer": "agent",
+      "path": "pages/decision-p533-baseline.md",
+      "sources": [
+        "ARCHITECTURE.md",
+        "ROADMAP.md"
+      ],
+      "status": "current",
+      "title": "Why is ITURHFProp vendored here rather than calling cqdx's P.533 sidecar?",
+      "verified_commit": "5c2dac7",
+      "verified_date": "2026-07-07",
+      "visibility": "private"
+    },
+    {
+      "hash": "sha256:f7bb651f26a1ffee33a65631c871c98ec875e9d7506cdda4735ded33c8f3ed89",
+      "id": "decision-prediction-contract",
+      "kind": "decision-digest",
+      "links": [
+        "overview",
+        "interface-prediction-surface"
+      ],
+      "locked": false,
+      "maintainer": "agent",
+      "path": "pages/decision-prediction-contract.md",
+      "sources": [
+        "docs/SPEC-contract-notes.md",
+        "contracts/prediction-surface.v1.schema.json"
+      ],
+      "status": "current",
+      "title": "Why is the prediction surface columnar and integer-quantized?",
+      "verified_commit": "5c2dac7",
+      "verified_date": "2026-07-07",
+      "visibility": "private"
+    },
+    {
+      "hash": "sha256:9b4efdae80eead81d8d0801888053992c6532fa1e175bf22c6b46b91281f9b46",
+      "id": "gotcha-eval-rules",
+      "kind": "gotcha",
+      "links": [
+        "overview",
+        "decision-monitor-normalized-negatives"
+      ],
+      "locked": false,
+      "maintainer": "agent",
+      "path": "pages/gotcha-eval-rules.md",
+      "sources": [
+        "ARCHITECTURE.md",
+        "docs/SPEC-labeling.md"
+      ],
+      "status": "current",
+      "title": "What will bite you about evaluation (blocked CV, full label set)?",
+      "verified_commit": "5c2dac7",
+      "verified_date": "2026-07-07",
+      "visibility": "private"
+    },
+    {
+      "hash": "sha256:431e4f8f73949b6841fa6239e6b1c101582876dbd897f427096ca6b0e22dec43",
+      "id": "gotcha-open-closed-boundary",
+      "kind": "gotcha",
+      "links": [
+        "overview",
+        "interface-prediction-surface"
+      ],
+      "locked": false,
+      "maintainer": "agent",
+      "path": "pages/gotcha-open-closed-boundary.md",
+      "sources": [
+        "README.md",
+        "ARCHITECTURE.md"
+      ],
+      "status": "current",
+      "title": "What will bite you if you add a cqdx dependency?",
+      "verified_commit": "5c2dac7",
+      "verified_date": "2026-07-07",
+      "visibility": "private"
+    },
+    {
+      "hash": "sha256:a33071bcd2aa7a5f05c90a63bb06c70afa61e70654b107c5c13d72ce0d47d06f",
+      "id": "interface-prediction-surface",
+      "kind": "interface",
+      "links": [
+        "overview",
+        "decision-prediction-contract"
+      ],
+      "locked": false,
+      "maintainer": "agent",
+      "path": "pages/interface-prediction-surface.md",
+      "sources": [
+        "contracts/prediction-surface.v1.schema.json",
+        "docs/SPEC-contract-notes.md"
+      ],
+      "status": "current",
+      "title": "What contract does this repo expose for HF band-opening predictions?",
+      "verified_commit": "5c2dac7",
+      "verified_date": "2026-07-07",
+      "visibility": "private"
+    },
+    {
+      "hash": "sha256:84455ee102bee28b37b7a6b5a88029b6b84de5d1af7aa7452de7377e60f292e7",
+      "id": "overview",
+      "kind": "overview",
+      "links": [],
+      "locked": false,
+      "maintainer": "agent",
+      "path": "pages/overview.md",
+      "sources": [
+        "README.md",
+        "ARCHITECTURE.md",
+        "ROADMAP.md",
+        "CLAUDE.md"
+      ],
+      "status": "current",
+      "title": "propagation \u2014 what is this and where do things live?",
+      "verified_commit": "5c2dac7",
+      "verified_date": "2026-07-07",
+      "visibility": "private"
+    },
+    {
+      "hash": "sha256:49cbad340e001a40793ed0339a92fa470bea4bfda63013939499ee7e4eda032c",
+      "id": "subsystem-data-pipeline",
+      "kind": "subsystem",
+      "links": [
+        "overview",
+        "gotcha-open-closed-boundary"
+      ],
+      "locked": false,
+      "maintainer": "agent",
+      "path": "pages/subsystem-data-pipeline.md",
+      "sources": [
+        "ARCHITECTURE.md"
+      ],
+      "status": "current",
+      "title": "How does the data pipeline work and why is it pluggable?",
+      "verified_commit": "5c2dac7",
+      "verified_date": "2026-07-07",
+      "visibility": "private"
+    }
+  ],
+  "repo": "propagation",
+  "schema": "wiki-manifest/v1",
+  "visibility": "private"
+}
