@@ -8,3 +8,5 @@ updates:
     groups:
       actions:
         patterns: ["*"]
+    ignore:
+      - dependency-name: "HagaleTechnologies/sunto"
