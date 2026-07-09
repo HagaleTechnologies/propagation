@@ -297,6 +297,61 @@ def score_yesterday(lake: Lake, surfaces_dir: Path) -> pl.DataFrame
     # joins archived surfaces vs realized labels; Brier per band/horizon
 ```
 
+## Reconciliation amendments (2026-07-09, after plan drafting)
+
+Deviations and extensions the five plans declared, reconciled here. Where an
+amendment touches a pinned item, the amendment wins over the original pin.
+
+**GBT predict semantics (M2 pin amended; M4 adapted).**
+`GBTModel.predict_p_open(cells)` requires `cells` to already carry
+`FEATURE_COLUMNS` (raises `ValueError` on missing columns) — it does NOT
+resolve features internally. Bare-cell semantics for serving are restored by
+`serving/score.py`'s `ServingGBT(inner, horizon_s, lake)` adapter, which
+calls `feature_matrix` at prediction time. `ClimatologyModel` and `P533Model`
+still take bare cells per the protocol.
+
+**M0 extensions.** `features/geometry.py` is *created* in M0 with
+`grid_to_latlon`, `haversine_km` (signatures as pinned) plus helper
+`latlon_to_grid4`; M2 extends the same module. New console script
+`build-spots-q = propagation.data.hygiene:main` (M3 re-runs it after adding
+sources). New lake datasets `hygiene_stats/` and `label_stats/` (QA check 8 +
+unlabeled-fraction reporting), with `features/labels.py::label_stats()`.
+QA results are tri-state PASS/FAIL/INSUFFICIENT; checks 6–7 are INSUFFICIENT
+until multi-year data / M2 space weather exist. QA CLI is `qa-gates`.
+
+**M1 extensions.** `src/propagation/eval/stratify.py` — definitive-Kp
+(GFZ archive) parsing and storm tagging, eval-stratification only
+(SPEC-labeling §6.4). ITURHFProp upstream facts (URL/commit, input-card
+keywords, units, report layout) are verify-and-pin action steps at execution
+time, recorded in `baselines/p533/PROVENANCE.md`.
+
+**M2 amendments.** `astral` dropped — solar position implemented directly
+(NOAA algorithm, tested against NREL SPA reference values). `load_sw_asof`
+returns raw `xray_flux`; `matrix.py` derives `xray_flux_log10` (the
+`FEATURE_COLUMNS` member). `spaceweather.py` adds `load_kp_def` (definitive
+series, structurally quarantined to eval). New modules
+`eval/train_gbt.py` (CLI `train-gbt`) and `eval/m2_gate.py` (CLI
+`check-m2-gate` — M3+ must not start until it exits 0). The
+same-hour-yesterday AR pair is null-filled for horizons > 3 h so temporal
+reach stays inside the 48 h CV gap. `FEATURE_COLUMNS` has 69 members.
+
+**M3 amendments.** New modules `data/common.py` (shared extractor helpers),
+`data/callgrids.py` (callsign→grid enrichment), `pipeline.py` (CLI
+`build-lake`), `train.py` (CLI `train-all`), `eval/storms.py`,
+`eval/gate.py` (minimum-credible-result gate). Additive `Lake.callgrids_dir()`.
+cqdx R2 env vars are `CQDX_R2_ENDPOINT/ACCESS_KEY/SECRET/BUCKET`.
+**Normative spec change required:** SPEC-labeling v1.1 §1.6 callsign→grid
+enrichment — RBN archives carry no location on either side, so without it the
+RBN extractor yields zero qualifying spots. The M3 plan lands the spec
+amendment before the code; it needs owner review before execution.
+
+**M4 extensions.** `ServingGBT` (above); additive kwargs
+`build_surface(..., generated_at=None)` and
+`score_yesterday(..., target_day=None)`; registry helpers `write_record`,
+`record_meta`, `model_file`, `cell_density`; optional `predict_snr`
+capability detection (SNR column omitted when models lack it); retrain
+guardrail tolerance 0.002 Brier at every horizon.
+
 ## Cross-milestone dependency summary
 
 - M1 consumes: `Lake`, `labels` view, `eval/*`, `OpennessModel`, `BANDS`.
