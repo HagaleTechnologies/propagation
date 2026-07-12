@@ -1,6 +1,7 @@
 import csv
 
 import numpy as np
+import pytest
 
 from propagation.eval.report import write_headline_report
 
@@ -21,7 +22,7 @@ def test_write_headline_report_creates_artifacts(tmp_path):
     with open(table_path) as f:
         rows = list(csv.DictReader(f))
     assert rows[-1]["model"] == "climatology-m0"
-    assert float(rows[-1]["brier"]) == result["brier"]
+    assert float(rows[-1]["brier"]) == pytest.approx(result["brier"], abs=1e-6)
     assert 0 <= result["brier"] <= 1
     assert result["log_loss"] > 0
 

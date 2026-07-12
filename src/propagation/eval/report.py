@@ -24,7 +24,7 @@ def write_headline_report(
     with open(table_path, "a") as f:
         if write_header:
             f.write("model,brier,log_loss,n\n")
-        f.write(f"{model_name},{brier},{logloss},{len(y_true)}\n")
+        f.write(f"{model_name},{brier:.6f},{logloss:.6f},{len(y_true)}\n")
 
     fig, ax = plt.subplots(figsize=(5, 5))
     predicted = [b["mean_predicted"] for b in bins if b["n"]]
