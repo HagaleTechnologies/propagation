@@ -14,8 +14,8 @@ def grid_to_latlon(grid: str) -> tuple[float, float]:
     if _GRID4_RE.match(g):
         field_lon = (ord(g[0]) - ord("A")) * 20 - 180
         field_lat = (ord(g[1]) - ord("A")) * 10 - 90
-        lat = field_lat + int(g[2]) * 1 + 0.5
-        lon = field_lon + int(g[3]) * 2
+        lon = field_lon + int(g[2]) * 2 + 1.0
+        lat = field_lat + int(g[3]) * 1 + 0.5
         return lat, lon
     if _FIELD_RE.match(g):
         field_lon = (ord(g[0]) - ord("A")) * 20 - 180

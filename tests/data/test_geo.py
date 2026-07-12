@@ -13,8 +13,8 @@ def test_grid_to_latlon_field_only():
 
 def test_grid_to_latlon_grid4():
     lat, lon = grid_to_latlon("EM12")
-    assert lat == pytest.approx(31.5)
-    assert lon == pytest.approx(-96.0)
+    assert lat == pytest.approx(32.5)
+    assert lon == pytest.approx(-97.0)
 
 
 def test_grid_to_latlon_truncates_grid6():
