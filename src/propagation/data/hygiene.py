@@ -15,6 +15,16 @@ _CW_MODES = {"CW", "RTTY"}
 _MIN_DISTANCE_KM = 25.0
 
 
+def is_rr73(raw: str | None) -> bool:
+    """Check if a raw grid string is the FT8 artifact 'RR73' blocklist."""
+    if not raw:
+        return False
+    g = raw.strip().upper()
+    if len(g) > 4:
+        g = g[:4]
+    return g == "RR73"
+
+
 def mode_class_for(mode: str) -> str:
     m = mode.strip().upper()
     if m in _DIGI_MODES:
@@ -27,11 +37,11 @@ def mode_class_for(mode: str) -> str:
 def normalize_grid(raw: str | None) -> str | None:
     if not raw:
         return None
+    if is_rr73(raw):
+        return None
     g = raw.strip().upper()
     if len(g) > 4:
         g = g[:4]
-    if g == "RR73":
-        return None
     if _GRID4_RE.match(g) or _FIELD_RE.match(g):
         return g
     return None
@@ -84,7 +94,7 @@ def is_qualifying_spot(row: dict) -> tuple[bool, str | None]:
 
     dx_grid_raw, de_grid_raw = row.get("dx_grid"), row.get("de_grid")
     for raw in (dx_grid_raw, de_grid_raw):
-        if raw and raw.strip().upper()[:4] == "RR73":
+        if is_rr73(raw):
             return False, "rr73_grid"
 
     dx_grid, de_grid = normalize_grid(dx_grid_raw), normalize_grid(de_grid_raw)
