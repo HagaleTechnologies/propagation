@@ -18,7 +18,7 @@ def build_transmit_evidence(spots: pl.DataFrame) -> pl.DataFrame:
     return (
         working.group_by(["window_start", "dx_field", "band", "mode_class"])
         .agg(
-            pl.len().alias("n_evidence_reports"),
+            pl.col("dx_call").n_unique().alias("n_evidence_reports"),
             (pl.col("source") == "wsprnet").any().alias("_has_wspr"),
         )
         .rename({"dx_field": "tx_field"})

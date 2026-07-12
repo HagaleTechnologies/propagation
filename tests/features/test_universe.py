@@ -81,3 +81,26 @@ def test_unlabeled_activity_fraction_shape():
     assert {"band", "date", "unlabeled_fraction"} <= set(report.columns)
     assert (report["unlabeled_fraction"] >= 0).all()
     assert (report["unlabeled_fraction"] <= 1).all()
+
+
+def test_n_tx_stations_counts_distinct_stations_not_reports():
+    """Regression test for: n_tx_stations must count DISTINCT transmitting stations,
+    not total evidence reports. If the same station is heard by multiple receivers
+    within one window/band/mode_class, it should count as 1 station, not as many reports."""
+    # Single transmitter K1JT from FN, heard by two different receivers W6SZ and K5ABC
+    # both in DM field, same window/band/mode_class -> should be 1 distinct tx station
+    spots = _df([
+        _spot(W0, "K1JT", "W6SZ", "FN20", "DM14"),   # K1JT heard by W6SZ
+        _spot(W0, "K1JT", "K5ABC", "FN20", "DM05"),  # Same K1JT heard by K5ABC (different receiver, same rx_field)
+    ])
+    uptime = build_receiver_uptime(spots)
+    universe = build_universe(spots, uptime)
+
+    # For the (FN, DM) pair on 20m, we should have:
+    # - n_spots = 2 (two direct spots)
+    # - n_tx_stations = 1 (one distinct transmitter, K1JT)
+    fn_dm = universe.filter(
+        (pl.col("tx_field") == "FN") & (pl.col("rx_field") == "DM") & (pl.col("band") == "20m")
+    ).row(0, named=True)
+    assert fn_dm["n_spots"] == 2
+    assert fn_dm["n_tx_stations"] == 1, f"Expected n_tx_stations=1 (one distinct station) but got {fn_dm['n_tx_stations']}"
