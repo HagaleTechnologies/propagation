@@ -3,6 +3,7 @@ import datetime as dt
 import polars as pl
 
 from propagation.qa.checks import (
+    _circular_mean_lon,
     check_diurnal_20m,
     check_grayline_40m,
     check_lowband_diurnal,
@@ -165,3 +166,57 @@ def test_run_qa_checks_returns_all_eight():
     labels = _df([_row(14, "FN", "DM", "20m", 1)])
     results = run_qa_checks(labels, rejection_counts={}, n_qualifying=1)
     assert {r.check_id for r in results} == {1, 2, 3, 4, 5, 6, 7, 8}
+
+
+def test_circular_mean_lon_antimeridian_crossing():
+    """Test that _circular_mean_lon correctly handles antimeridian wraparound.
+
+    Pair AJ-RO crosses the antimeridian with:
+    - AJ: lon=-170.0 (field centroid)
+    - RO: lon=170.0 (field centroid)
+    - Distance: 5841.2 km (within check1's 3000-8000 km range)
+
+    The naive average (lon1 + lon2) / 2 = 0.0, which is geographically incorrect.
+    The correct midpoint should be near ±180 degrees.
+    """
+    lon1, lon2 = -170.0, 170.0
+    mid_lon = _circular_mean_lon(lon1, lon2)
+    # The midpoint should be near ±180 (they're the same location on the sphere)
+    # Due to how we normalize, we expect 180 or close to it
+    assert abs(abs(mid_lon) - 180.0) < 0.1, f"Expected mid_lon near ±180, got {mid_lon}"
+    # Verify it's NOT the naive average
+    naive_mid = (lon1 + lon2) / 2.0
+    assert naive_mid == 0.0  # The bug case
+    assert mid_lon != naive_mid  # The fix distinguishes them
+
+
+def test_circular_mean_lon_normal_case():
+    """Test that _circular_mean_lon still works correctly for normal (non-antimeridian) cases."""
+    # Normal case: -90 and 90 should average to 0
+    assert _circular_mean_lon(-90.0, 90.0) == 0.0
+    # Normal case: -50 and -30 should average to -40
+    assert _circular_mean_lon(-50.0, -30.0) == -40.0
+    # Normal case: 30 and 50 should average to 40
+    assert _circular_mean_lon(30.0, 50.0) == 40.0
+
+
+def test_check1_antimeridian_crossing_pair():
+    """Test that check1 correctly uses antimeridian-aware longitude for local-time correction.
+
+    Uses pair AJ-RO which crosses the antimeridian (lon=-170 to +170).
+    With local-time correction via _circular_mean_lon, the path midpoint should be
+    near ±180°, giving hour offset of ±12, not 0.
+    """
+    # AJ-RO distance is 5841.2 km, in range [3000, 8000].
+    # Correct mid_lon is ~180 or -180, which gives offset of ±12 hours.
+    # UTC hour 14 -> local hour (14 + 180/15) % 24 = (14 + 12) % 24 = 2 (night)
+    # UTC hour 2 -> local hour (2 + 180/15) % 24 = (2 + 12) % 24 = 14 (day)
+    rows = (
+        [_row(2, "AJ", "RO", "20m", 1) for _ in range(9)]
+        + [_row(2, "AJ", "RO", "20m", 0)]
+        + [_row(14, "AJ", "RO", "20m", 1)]
+        + [_row(14, "AJ", "RO", "20m", 0) for _ in range(9)]
+    )
+    result = check_diurnal_20m(_df(rows))
+    assert result.status == "pass", f"Expected pass but got {result.status}: {result.detail}"
+    assert "local-time corrected" in result.detail

@@ -6,6 +6,25 @@ import polars as pl
 from propagation.data.geo import grid_to_latlon, great_circle_km
 
 
+def _circular_mean_lon(lon1: float, lon2: float) -> float:
+    """Average two longitudes in degrees, correctly handling antimeridian wraparound.
+
+    For example, -170 and 170 are 20 degrees apart via the dateline, not 340 apart
+    via Greenwich, so their midpoint is near ±180, not 0.
+    """
+    diff = lon2 - lon1
+    if diff > 180:
+        lon2 -= 360
+    elif diff < -180:
+        lon2 += 360
+    mid = (lon1 + lon2) / 2.0
+    if mid > 180:
+        mid -= 360
+    elif mid < -180:
+        mid += 360
+    return mid
+
+
 @dataclass
 class QAResult:
     check_id: int
@@ -41,7 +60,7 @@ def _diurnal_ratio_check(
                 lat2, lon2 = grid_to_latlon(p["rx_field"])
                 key = (p["tx_field"], p["rx_field"])
                 dist_by_pair[key] = great_circle_km(lat1, lon1, lat2, lon2)
-                mid_lon_by_pair[key] = (lon1 + lon2) / 2.0
+                mid_lon_by_pair[key] = _circular_mean_lon(lon1, lon2)
             except ValueError:
                 continue
 
