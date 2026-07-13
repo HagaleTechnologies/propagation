@@ -1,6 +1,9 @@
 import gzip
 from pathlib import Path
 
+import duckdb
+
+from propagation.data.lake import register_view
 from scripts.run_m0 import run_m0
 
 TRAIN_ROWS = [
@@ -43,3 +46,11 @@ def test_run_m0_end_to_end(tmp_path):
     assert result["n_eval_labels"] > 0
     assert 0 <= result["headline"]["brier"] <= 1
     assert len(result["qa_results"]) == 8
+
+    # The labels table must have one uniform schema across train and eval
+    # partitions: read_parquet(..., hive_partitioning=true) over the whole glob
+    # must succeed without union_by_name, and both splits must be queryable.
+    con = duckdb.connect(":memory:")
+    register_view(con, "labels", str(lake_root / "labels" / "**" / "*.parquet"))
+    splits = {row[0] for row in con.execute("SELECT DISTINCT split FROM labels").fetchall()}
+    assert splits == {"train", "eval"}

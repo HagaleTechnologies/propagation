@@ -3,6 +3,8 @@ from __future__ import annotations
 import argparse
 from pathlib import Path
 
+import polars as pl
+
 from propagation.data.lake import write_partitioned
 from propagation.data.wsprnet import download_wsprnet_archive, extract_wsprnet
 from propagation.eval.report import write_headline_report
@@ -43,8 +45,20 @@ def run_m0(archives: dict[str, Path], band: str, lake_root: Path, report_dir: Pa
     eval_labels = build_labels(eval_extract.spots, eval_universe)
 
     train_sampled = sample_labels(train_labels, ratio=3.0)
-    write_labels(train_sampled, lake_root)
-    write_labels(eval_labels, lake_root)
+    # The `labels` lake table must have one uniform schema across all partitions
+    # (train and eval alike) so it can be read back with a single hive-partitioned
+    # read_parquet(..., hive_partitioning=true) glob without union_by_name. `split`
+    # discriminates which rows came from the (downsampled) training set vs. the
+    # full eval set; `sample_weight` is always present, and is 1.0 for every eval
+    # row since eval is never downsampled (docs/SPEC-labeling.md sec 4.5).
+    write_labels(train_sampled.with_columns(pl.lit("train").alias("split")), lake_root)
+    write_labels(
+        eval_labels.with_columns(
+            pl.lit("eval").alias("split"),
+            pl.lit(1.0).alias("sample_weight"),
+        ),
+        lake_root,
+    )
 
     model = ClimatologyModel().fit(train_labels)
     predictions = model.predict(eval_labels)
