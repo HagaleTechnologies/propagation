@@ -8,6 +8,7 @@ import polars as pl
 from propagation.data.lake import write_partitioned
 from propagation.data.wsprnet import download_wsprnet_archive, extract_wsprnet
 from propagation.eval.report import write_headline_report
+from propagation.eval.splits import blocked_cv_gap_hours
 from propagation.features.labels import build_labels
 from propagation.features.sampling import sample_labels, write_labels
 from propagation.features.universe import build_universe, unlabeled_activity_fraction
@@ -58,6 +59,24 @@ def run_m0(archives: dict[str, Path], band: str, lake_root: Path, report_dir: Pa
 
     train_labels = build_labels(train_extract.spots, train_universe)
     eval_labels = build_labels(eval_extract.spots, eval_universe)
+
+    # docs/SPEC-labeling.md sec 6 rule 1: train and eval must be separated by a
+    # blocked-CV gap of at least max(48h, horizon + AR lookback), to prevent
+    # leakage across the boundary. M0's climatology model has no horizon or
+    # autoregressive features, so the current floor is exactly 48h — but this
+    # check is data-driven (train's last window vs. eval's first window) so it
+    # automatically tightens if the formula's inputs change. NOTE: this MUST be
+    # revisited with the real max_horizon_hours/max_ar_lookback_hours when M2
+    # adds autoregressive/horizon features — a 0/0 check would then silently
+    # under-enforce the true leakage-safety gap.
+    train_end = train_labels["window_start"].max()
+    eval_start = eval_labels["window_start"].min()
+    gap_hours = (eval_start - train_end).total_seconds() / 3600
+    min_gap_hours = blocked_cv_gap_hours(max_horizon_hours=0, max_ar_lookback_hours=0)
+    assert gap_hours >= min_gap_hours, (
+        f"train/eval gap is {gap_hours:.1f}h, below the required "
+        f"{min_gap_hours:.1f}h leakage-safety floor (docs/SPEC-labeling.md sec 6)"
+    )
 
     train_sampled = sample_labels(train_labels, ratio=3.0)
     # The `labels` lake table must have one uniform schema across all partitions
