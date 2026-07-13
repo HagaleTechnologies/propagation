@@ -38,6 +38,21 @@ def run_m0(archives: dict[str, Path], band: str, lake_root: Path, report_dir: Pa
     train_uptime = build_receiver_uptime(train_extract.spots)
     eval_uptime = build_receiver_uptime(eval_extract.spots)
 
+    # receiver_uptime is a first-class lake table (ARCHITECTURE.md sec 3.1,
+    # ROADMAP.md M0) alongside spots and labels.
+    write_partitioned(
+        train_uptime.with_columns(
+            pl.col("window_start").dt.date().cast(pl.Utf8).alias("date")
+        ),
+        lake_root, "receiver_uptime", ["band", "date"],
+    )
+    write_partitioned(
+        eval_uptime.with_columns(
+            pl.col("window_start").dt.date().cast(pl.Utf8).alias("date")
+        ),
+        lake_root, "receiver_uptime", ["band", "date"],
+    )
+
     train_universe = build_universe(train_extract.spots, train_uptime)
     eval_universe = build_universe(eval_extract.spots, eval_uptime)
 

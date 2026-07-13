@@ -40,6 +40,7 @@ def test_run_m0_end_to_end(tmp_path):
 
     assert (lake_root / "spots").exists()
     assert (lake_root / "labels").exists()
+    assert (lake_root / "receiver_uptime").exists()
     assert (report_dir / "headline_table.csv").exists()
     assert (report_dir / "reliability_climatology-m0.png").exists()
     assert result["n_train_labels"] > 0
