@@ -23,11 +23,57 @@ def _diurnal_ratio_check(
     night_hours: tuple[int, int],
     min_ratio: float,
     numerator: str,  # "day" or "night"
+    distance_km_range: tuple[float, float | None] | None = None,
 ) -> QAResult:
     subset = labels.filter(pl.col("band").is_in(bands))
     if subset.height == 0:
         return QAResult(check_id, name, "insufficient_data", f"no labels for bands {sorted(bands)}")
-    working = subset.with_columns(pl.col("window_start").dt.hour().alias("hour"))
+
+    local_time_corrected = distance_km_range is not None
+    if distance_km_range is not None:
+        lo, hi = distance_km_range
+        pairs = subset.select(["tx_field", "rx_field"]).unique().to_dicts()
+        dist_by_pair: dict[tuple[str, str], float] = {}
+        mid_lon_by_pair: dict[tuple[str, str], float] = {}
+        for p in pairs:
+            try:
+                lat1, lon1 = grid_to_latlon(p["tx_field"])
+                lat2, lon2 = grid_to_latlon(p["rx_field"])
+                key = (p["tx_field"], p["rx_field"])
+                dist_by_pair[key] = great_circle_km(lat1, lon1, lat2, lon2)
+                mid_lon_by_pair[key] = (lon1 + lon2) / 2.0
+            except ValueError:
+                continue
+
+        subset = subset.with_columns(
+            pl.struct(["tx_field", "rx_field"])
+            .map_elements(
+                lambda r: dist_by_pair.get((r["tx_field"], r["rx_field"])), return_dtype=pl.Float64
+            )
+            .alias("distance_km"),
+            pl.struct(["tx_field", "rx_field"])
+            .map_elements(
+                lambda r: mid_lon_by_pair.get((r["tx_field"], r["rx_field"])), return_dtype=pl.Float64
+            )
+            .alias("mid_lon"),
+        )
+        if hi is None:
+            subset = subset.filter(pl.col("distance_km") > lo)
+        else:
+            subset = subset.filter(pl.col("distance_km").is_between(lo, hi))
+        if subset.height == 0:
+            return QAResult(
+                check_id, name, "insufficient_data",
+                f"no paths in distance range {distance_km_range} km",
+            )
+
+    if local_time_corrected:
+        working = subset.with_columns(
+            ((pl.col("window_start").dt.hour() + pl.col("mid_lon") / 15.0) % 24.0).alias("hour")
+        )
+    else:
+        working = subset.with_columns(pl.col("window_start").dt.hour().alias("hour"))
+
     day = working.filter(pl.col("hour").is_between(*day_hours))
     night_lo, night_hi = night_hours
     night = working.filter((pl.col("hour") >= night_lo) | (pl.col("hour") <= night_hi))
@@ -40,22 +86,35 @@ def _diurnal_ratio_check(
         return QAResult(check_id, name, "insufficient_data", "zero-rate denominator")
     ratio = num / den
     status = "pass" if ratio > min_ratio else "fail"
-    return QAResult(check_id, name, status, f"{numerator}/other open-rate ratio={ratio:.2f}")
+    if local_time_corrected:
+        detail = (
+            f"{numerator}/other open-rate ratio={ratio:.2f} (local-time corrected via "
+            "path-midpoint longitude; full solar-geometry accuracy lands with M2's "
+            "features/solar.py)"
+        )
+    else:
+        detail = f"{numerator}/other open-rate ratio={ratio:.2f}"
+    return QAResult(check_id, name, status, detail)
 
 
 def check_diurnal_20m(labels: pl.DataFrame) -> QAResult:
-    """SPEC-labeling sec 6 QA check 1: 20m mid-lat day/night ratio > 2."""
+    """SPEC-labeling sec 6 QA check 1: 20m mid-lat (3-8 Mm paths) day/night
+    ratio > 2. Uses local-time correction via path-midpoint longitude since
+    WSPRnet is a global network and raw UTC-hour bucketing mixes local
+    morning/midnight across regions."""
     return _diurnal_ratio_check(
         labels, 1, "20m_diurnal", {"20m"}, day_hours=(12, 17), night_hours=(22, 3),
-        min_ratio=2.0, numerator="day",
+        min_ratio=2.0, numerator="day", distance_km_range=(3000, 8000),
     )
 
 
 def check_lowband_diurnal(labels: pl.DataFrame) -> QAResult:
-    """QA check 2: 160m/80m night/day ratio > 5."""
+    """QA check 2: 160m/80m (paths > 2 Mm) night/day ratio > 5. Uses
+    local-time correction via path-midpoint longitude (see check_diurnal_20m)."""
     return _diurnal_ratio_check(
         labels, 2, "lowband_diurnal", {"160m", "80m"}, day_hours=(12, 17),
         night_hours=(22, 3), min_ratio=5.0, numerator="night",
+        distance_km_range=(2000, None),
     )
 
 

@@ -26,15 +26,31 @@ def _df(rows):
     return pl.DataFrame(rows, schema_overrides={"window_start": pl.Datetime("us", "UTC")})
 
 
+# FN-DM: computed via propagation.data.geo.grid_to_latlon/great_circle_km
+# (see /Users/thagale/Code/propagation/.claude/worktrees/m0-lake-bootstrap/.superpowers/sdd/task-15-report.md
+# for the exact script output): distance=3543.2 km (within check1's 3-8 Mm
+# and check2's >2 Mm ranges), midpoint longitude=-90.0 deg, so
+# local_hour = (utc_hour + mid_lon/15) % 24 = (utc_hour - 6) % 24.
+# local_hour=14 (mid-day) <-> utc_hour=20; local_hour=1 (mid-night) <-> utc_hour=7.
+_FN_DM_UTC_DAY = 20
+_FN_DM_UTC_NIGHT = 7
+
+# FN-EM: distance=2025.7 km -- below check1's 3000 km floor, so it is used
+# below as a check1 (3-8 Mm) out-of-range pair.
+# EM-EN: distance=1112.0 km -- below check2's 2000 km floor, used below as a
+# check2 (>2 Mm) out-of-range pair.
+
+
 def test_check1_passes_with_strong_diurnal_signal():
     rows = (
-        [_row(14, "FN", "DM", "20m", 1) for _ in range(9)]
-        + [_row(14, "FN", "DM", "20m", 0)]
-        + [_row(1, "FN", "DM", "20m", 1)]
-        + [_row(1, "FN", "DM", "20m", 0) for _ in range(9)]
+        [_row(_FN_DM_UTC_DAY, "FN", "DM", "20m", 1) for _ in range(9)]
+        + [_row(_FN_DM_UTC_DAY, "FN", "DM", "20m", 0)]
+        + [_row(_FN_DM_UTC_NIGHT, "FN", "DM", "20m", 1)]
+        + [_row(_FN_DM_UTC_NIGHT, "FN", "DM", "20m", 0) for _ in range(9)]
     )
     result = check_diurnal_20m(_df(rows))
     assert result.status == "pass"
+    assert "local-time corrected" in result.detail
 
 
 def test_check1_insufficient_data_no_20m():
@@ -42,15 +58,53 @@ def test_check1_insufficient_data_no_20m():
     assert result.status == "insufficient_data"
 
 
+def test_check1_distance_filter_excludes_out_of_range_pairs():
+    # FN-EM is 2025.7 km -- outside check1's required 3000-8000 km band, so
+    # an all-FN-EM fixture must yield insufficient_data even with a strong
+    # apparent diurnal signal in the raw rows.
+    rows = (
+        [_row(_FN_DM_UTC_DAY, "FN", "EM", "20m", 1) for _ in range(5)]
+        + [_row(_FN_DM_UTC_NIGHT, "FN", "EM", "20m", 0) for _ in range(5)]
+    )
+    result = check_diurnal_20m(_df(rows))
+    assert result.status == "insufficient_data"
+    assert "distance range" in result.detail
+
+    # Mixing in the out-of-range pair alongside the in-range FN-DM signal
+    # must not change the ratio computed from FN-DM alone.
+    in_range_rows = (
+        [_row(_FN_DM_UTC_DAY, "FN", "DM", "20m", 1) for _ in range(9)]
+        + [_row(_FN_DM_UTC_DAY, "FN", "DM", "20m", 0)]
+        + [_row(_FN_DM_UTC_NIGHT, "FN", "DM", "20m", 1)]
+        + [_row(_FN_DM_UTC_NIGHT, "FN", "DM", "20m", 0) for _ in range(9)]
+    )
+    result_in_range_only = check_diurnal_20m(_df(in_range_rows))
+    result_mixed = check_diurnal_20m(_df(in_range_rows + rows))
+    assert result_mixed.status == "pass"
+    assert result_mixed.detail == result_in_range_only.detail
+
+
 def test_check2_lowband_uses_night_over_day_ratio():
     rows = (
-        [_row(1, "FN", "DM", "160m", 1) for _ in range(9)]
-        + [_row(1, "FN", "DM", "160m", 0)]
-        + [_row(14, "FN", "DM", "160m", 1)]
-        + [_row(14, "FN", "DM", "160m", 0) for _ in range(9)]
+        [_row(_FN_DM_UTC_NIGHT, "FN", "DM", "160m", 1) for _ in range(9)]
+        + [_row(_FN_DM_UTC_NIGHT, "FN", "DM", "160m", 0)]
+        + [_row(_FN_DM_UTC_DAY, "FN", "DM", "160m", 1)]
+        + [_row(_FN_DM_UTC_DAY, "FN", "DM", "160m", 0) for _ in range(9)]
     )
     result = check_lowband_diurnal(_df(rows))
     assert result.status == "pass"
+    assert "local-time corrected" in result.detail
+
+
+def test_check2_distance_filter_insufficient_data_for_short_pair():
+    # EM-EN is 1112.0 km -- outside check2's required >2000 km band.
+    rows = (
+        [_row(_FN_DM_UTC_NIGHT, "EM", "EN", "160m", 1) for _ in range(9)]
+        + [_row(_FN_DM_UTC_DAY, "EM", "EN", "160m", 0) for _ in range(9)]
+    )
+    result = check_lowband_diurnal(_df(rows))
+    assert result.status == "insufficient_data"
+    assert "distance range" in result.detail
 
 
 def test_check3_gate_reports_insufficient_data_without_solar_features():
