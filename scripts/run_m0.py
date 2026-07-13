@@ -125,7 +125,7 @@ def main() -> None:
     parser.add_argument("--train-year", type=int, default=2014)
     parser.add_argument("--train-month", type=int, default=6)
     parser.add_argument("--eval-year", type=int, default=2014)
-    parser.add_argument("--eval-month", type=int, default=7)
+    parser.add_argument("--eval-month", type=int, default=8)
     parser.add_argument("--band", default="20m")
     parser.add_argument("--data-dir", type=Path, default=Path("data"))
     args = parser.parse_args()
