@@ -1,7 +1,30 @@
 {
-  "generated_at": "2026-07-07T05:51:02Z",
-  "head_commit": "5c2dac7",
+  "generated_at": "2026-07-15T01:27:30Z",
+  "head_commit": "5f75677",
   "pages": [
+    {
+      "hash": "sha256:39407c42b7df8def75eb20323e55dc824bf6249c73a071a1c95484387afcbcfb",
+      "id": "decision-m0-scope-reductions",
+      "kind": "decision-digest",
+      "links": [
+        "overview",
+        "gotcha-qa-diurnal-checks",
+        "gotcha-eval-rules"
+      ],
+      "locked": false,
+      "maintainer": "agent",
+      "path": "pages/decision-m0-scope-reductions.md",
+      "sources": [
+        "docs/superpowers/plans/2026-07-11-m0-lake-bootstrap.md",
+        "src/propagation/models/climatology.py",
+        "src/propagation/features/universe.py"
+      ],
+      "status": "current",
+      "title": "Which M0 scope reductions were deliberate, and when do they expire?",
+      "verified_commit": "5f75677",
+      "verified_date": "2026-07-14",
+      "visibility": "private"
+    },
     {
       "hash": "sha256:16964996ec0ce3981c1dc68dd6c3cda6f2a8ef7ea40640a3af80827dcb7f85fc",
       "id": "decision-monitor-normalized-negatives",
@@ -108,6 +131,27 @@
       "visibility": "private"
     },
     {
+      "hash": "sha256:3fc81c720a89726b4df6eac5948d0163aaf52ead4c5071320653ed43da72b288",
+      "id": "gotcha-qa-diurnal-checks",
+      "kind": "gotcha",
+      "links": [
+        "overview",
+        "decision-m0-scope-reductions"
+      ],
+      "locked": false,
+      "maintainer": "agent",
+      "path": "pages/gotcha-qa-diurnal-checks.md",
+      "sources": [
+        "src/propagation/qa/checks.py",
+        "docs/SPEC-labeling.md"
+      ],
+      "status": "current",
+      "title": "What will bite you about the QA diurnal-ratio checks (1 and 2)?",
+      "verified_commit": "5f75677",
+      "verified_date": "2026-07-14",
+      "visibility": "private"
+    },
+    {
       "hash": "sha256:a33071bcd2aa7a5f05c90a63bb06c70afa61e70654b107c5c13d72ce0d47d06f",
       "id": "interface-prediction-surface",
       "kind": "interface",
@@ -129,7 +173,7 @@
       "visibility": "private"
     },
     {
-      "hash": "sha256:84455ee102bee28b37b7a6b5a88029b6b84de5d1af7aa7452de7377e60f292e7",
+      "hash": "sha256:433ffc9d75d773ca2091dc0435e51d423fa98d1f610ea450d675abb2654db1ba",
       "id": "overview",
       "kind": "overview",
       "links": [],
@@ -144,8 +188,8 @@
       ],
       "status": "current",
       "title": "propagation \u2014 what is this and where do things live?",
-      "verified_commit": "5c2dac7",
-      "verified_date": "2026-07-07",
+      "verified_commit": "5f75677",
+      "verified_date": "2026-07-14",
       "visibility": "private"
     },
     {

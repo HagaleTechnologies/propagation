@@ -10,8 +10,8 @@ sources:
   - ROADMAP.md
   - CLAUDE.md
 verified:
-  commit: 5c2dac7
-  date: 2026-07-07
+  commit: 5f75677
+  date: 2026-07-14
 links:
 ---
 ML-based HF propagation nowcasting: train on real path-report data
@@ -19,8 +19,10 @@ ML-based HF propagation nowcasting: train on real path-report data
 rx field, band) × 15-minute window, benchmarked honestly against ITU-R P.533
 and climatology. The novel methodological contribution is monitor-normalized
 negative sampling, which handles observation bias in sparse amateur-radio
-reception reports. Design phase complete; no implementation yet — next step
-is M0 in ROADMAP.md.
+reception reports. M0 is complete (PR #11): the WSPRnet→lake→labels→
+climatology→eval pipeline runs end-to-end from empty `data/` and the M0
+acceptance bar is met. Next step is M1 (vendored P.533 baseline) in
+ROADMAP.md.
 
 ## Where things live
 
@@ -34,7 +36,10 @@ is M0 in ROADMAP.md.
 - `ROADMAP.md` — milestones M0–M4 with acceptance criteria; check M0 before
   any M1+ work
 - `baselines/p533/` — vendored ITURHFProp build (not yet present; M1 task)
-- `src/propagation/` — planned layout; nothing implemented yet
+- `src/propagation/` — implemented M0 pipeline: `data/` (extract, hygiene,
+  dedup, lake), `features/` (uptime, universe, labels, sampling), `models/`
+  (climatology), `eval/` (splits, metrics, report), `qa/` (checks)
+- `scripts/run_m0.py` — end-to-end M0 orchestration; the acceptance artifact
 
 ## Start here
 
