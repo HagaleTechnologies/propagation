@@ -8,8 +8,9 @@ sampling that handles observation bias.
 
 ## Status
 
-Design phase complete; no implementation yet. Next step is M0 in ROADMAP.md
-(one month of one band extracted to Parquet + climatology baseline evaluated).
+M0 complete (PR #11): WSPRnet extraction, monitor-normalized labeling,
+climatology baseline, and eval harness run end-to-end via `scripts/run_m0.py`.
+Next step is M1 in ROADMAP.md (vendored ITURHFProp P.533 baseline).
 
 ## Documents (read in this order)
 
