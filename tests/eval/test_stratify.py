@@ -2,6 +2,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 import polars as pl
+import pytest
 
 from propagation.eval import stratify
 
@@ -20,6 +21,25 @@ def test_parse_gfz_kp():
         _utc(2026, 6, 15, 6), _utc(2026, 6, 15, 9),
     ]
     assert df["kp"].to_list() == [1.667, 2.0, 5.333, 6.0]
+
+
+def test_parse_gfz_excludes_provisional_rows():
+    """The fixture's 5th line has D=0 (provisional) and must be dropped."""
+    df = stratify._parse_gfz(FIXTURE.read_text())
+    assert len(df) == 4
+    assert _utc(2026, 6, 15, 12) not in df["block_start"].to_list()
+
+
+def test_parse_gfz_raises_clear_error_on_too_few_fields():
+    bad = "2026 06 15 00.0 01.5 34500.00000 34500.06250  1.667     6\n"
+    with pytest.raises(ValueError, match="GFZ"):
+        stratify._parse_gfz(bad)
+
+
+def test_parse_gfz_raises_clear_error_on_non_numeric_field():
+    bad = "2026 06 15 00.0 01.5 34500.00000 34500.06250  bogus     6 1\n"
+    with pytest.raises(ValueError, match="GFZ"):
+        stratify._parse_gfz(bad)
 
 
 def test_fetch_definitive_kp_caches(tmp_path, monkeypatch):
