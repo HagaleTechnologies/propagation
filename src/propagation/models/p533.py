@@ -35,11 +35,13 @@ _HOUR_OFFSET = 1
 
 # BCR = P(SNR >= SNRr). SNRr = -21 dB in BW 2500 Hz is the FT8 decode
 # threshold, matching the labels' "open for the most sensitive active mode"
-# semantics (docs/SPEC-labeling.md sec 4.4). txpower 100 W matches the
-# snr_ft8eq 100 W power reference used in propagation.features.labels
-# (pwr_offset relative to 50 dBm). Units of Path.txpower: verify (kW vs
-# dBkW), see verification list #3.
-_TXPOWER = "0.1"
+# semantics (docs/SPEC-labeling.md sec 4.4). Path.txpower is dB(1 kW), per
+# the vendored upstream's own docs (baselines/p533/upstream/README.md:86 and
+# the `txpower` field comment in
+# baselines/p533/upstream/P533/Src/P533/P533.h) — NOT linear kW. -10.0
+# dB(kW) = 100 W, matching the snr_ft8eq 100 W power reference used in
+# propagation.features.labels (pwr_offset relative to 50 dBm).
+_TXPOWER = "-10.0"
 
 
 @dataclass(frozen=True)

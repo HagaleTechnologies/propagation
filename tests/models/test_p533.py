@@ -38,6 +38,7 @@ def test_render_input_card_contains_all_parameters():
         "Path.L_tx.lat 35.0000", "Path.L_tx.lng -90.0000",
         "Path.L_rx.lat 45.0000", "Path.L_rx.lng 135.0000",
         "Path.month 7", "Path.SSN 123", "Path.frequency 14.0740",
+        "Path.txpower -10.0",
         "Path.BW 2500.0", "Path.SNRr -21.0",
         'RptFilFormat "RPT_BCR | RPT_SNR"',
     ):
