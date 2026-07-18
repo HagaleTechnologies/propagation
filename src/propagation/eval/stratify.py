@@ -66,7 +66,7 @@ def _parse_gfz(text: str) -> pl.DataFrame:
 def fetch_definitive_kp(cache_dir: Path) -> pl.DataFrame:
     cache = cache_dir / "gfz_kp.txt"
     if not cache.exists():
-        resp = httpx.get(GFZ_KP_URL, timeout=60)
+        resp = httpx.get(GFZ_KP_URL, timeout=60, follow_redirects=True)
         resp.raise_for_status()
         cache_dir.mkdir(parents=True, exist_ok=True)
         cache.write_text(resp.text)
