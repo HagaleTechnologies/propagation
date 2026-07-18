@@ -29,8 +29,6 @@ from propagation.features.uptime import build_receiver_uptime
 from propagation.models.climatology import ClimatologyModel
 from propagation.models.p533 import P533Model, ssn_by_month
 
-CELL_COLS = ["window_start", "tx_field", "rx_field", "band"]
-
 
 def _build_labels(archives: dict[str, Path], band: str) -> tuple[pl.DataFrame, pl.DataFrame]:
     """Re-derives full, unsampled train/eval labels the same way

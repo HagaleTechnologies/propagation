@@ -1,5 +1,3 @@
-from pathlib import Path
-
 from propagation.models.p533_build import repo_root, binary_path
 
 
