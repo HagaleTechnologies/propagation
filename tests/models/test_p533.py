@@ -1,9 +1,12 @@
+import subprocess
 from pathlib import Path
 
 import pytest
 
 from propagation.data.schema import SUPPORTED_BANDS
+from propagation.models import p533
 from propagation.models.p533 import BAND_FREQ_MHZ, P533Result, parse_report, render_input_card
+from propagation.models.p533_build import binary_path
 
 
 def test_every_supported_band_has_a_frequency():
@@ -50,9 +53,50 @@ def test_render_input_card_hour_convention():
 
 def test_parse_report_extracts_bcr_and_snr():
     result = parse_report(FIXTURE.read_text())
-    assert result == P533Result(reliability_pct=87.0, snr_db=23.0)
+    assert result == P533Result(reliability_pct=78.24, snr_db=-10.2)
 
 
 def test_parse_report_raises_on_missing_columns():
     with pytest.raises(ValueError, match="BCR"):
         parse_report("no data here\n")
+
+
+def test_p533_score_invokes_binary_and_parses(monkeypatch, tmp_path):
+    seen = {}
+
+    def fake_run(cmd, **kwargs):
+        seen["cmd"] = cmd
+        # ITURHFProp usage: iturhfprop <input> <output> — write the report.
+        Path(cmd[2]).write_text(FIXTURE.read_text())
+        return subprocess.CompletedProcess(cmd, 0, stdout="", stderr="")
+
+    monkeypatch.setattr(p533.subprocess, "run", fake_run)
+    result = p533.p533_score(
+        tx_lat=35.0, tx_lon=-90.0, rx_lat=45.0, rx_lon=135.0,
+        band="20m", month=7, hour=14, ssn=120.0,
+    )
+    assert result == P533Result(reliability_pct=78.24, snr_db=-10.2)
+    assert "iturhfprop" in Path(seen["cmd"][0]).name
+    card = Path(seen["cmd"][1]).read_text()
+    assert "Path.frequency 14.0740" in card
+
+
+def test_p533_score_raises_on_nonzero_exit(monkeypatch):
+    def fake_run(cmd, **kwargs):
+        return subprocess.CompletedProcess(cmd, 3, stdout="", stderr="boom")
+
+    monkeypatch.setattr(p533.subprocess, "run", fake_run)
+    with pytest.raises(RuntimeError, match="exit 3"):
+        p533.p533_score(0, 0, 10, 10, "20m", 1, 0, 10.0)
+
+
+@pytest.mark.skipif(not binary_path().exists(), reason="run `uv run build-p533` first")
+def test_p533_score_against_real_binary():
+    # A path that must be reliably open: 1000 km mid-latitude 20m, midday, high SSN.
+    result = p533.p533_score(
+        tx_lat=40.0, tx_lon=-100.0, rx_lat=40.0, rx_lon=-88.0,
+        band="20m", month=7, hour=18, ssn=150.0,
+    )
+    assert 0.0 <= result.reliability_pct <= 100.0
+    assert result.reliability_pct > 50.0
+    assert -40.0 <= result.snr_db <= 60.0
