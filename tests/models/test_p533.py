@@ -1,5 +1,9 @@
+from pathlib import Path
+
+import pytest
+
 from propagation.data.schema import SUPPORTED_BANDS
-from propagation.models.p533 import BAND_FREQ_MHZ
+from propagation.models.p533 import BAND_FREQ_MHZ, P533Result, parse_report, render_input_card
 
 
 def test_every_supported_band_has_a_frequency():
@@ -14,10 +18,6 @@ def test_frequencies_are_the_primary_ft8_dial_frequency():
     }
     assert BAND_FREQ_MHZ == expected
 
-
-from pathlib import Path
-
-from propagation.models.p533 import P533Result, parse_report, render_input_card
 
 FIXTURE = Path(__file__).parent.parent / "fixtures" / "p533_report_sample.txt"
 
@@ -54,6 +54,5 @@ def test_parse_report_extracts_bcr_and_snr():
 
 
 def test_parse_report_raises_on_missing_columns():
-    import pytest
     with pytest.raises(ValueError, match="BCR"):
         parse_report("no data here\n")

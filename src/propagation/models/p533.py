@@ -5,6 +5,8 @@ midpoint-to-midpoint), reusing propagation.data.geo.grid_to_latlon for the
 field-center math. Standalone: no cqdx dependency (README boundaries).
 """
 from __future__ import annotations
+from dataclasses import dataclass
+from pathlib import Path
 
 # Primary digital-activity (FT8) dial frequency per band, MHz — the
 # frequency at which most label-generating spots occur, hence the honest
@@ -14,9 +16,6 @@ BAND_FREQ_MHZ: dict[str, float] = {
     "30m": 10.136, "20m": 14.074, "17m": 18.100, "15m": 21.074,
     "12m": 24.915, "10m": 28.074, "6m": 50.313,
 }
-
-from dataclasses import dataclass
-from pathlib import Path
 
 # ITURHFProp hour convention: 1..24 UTC in the input card (verify against
 # vendored README — see plan "Execution-time verification list" #2).
