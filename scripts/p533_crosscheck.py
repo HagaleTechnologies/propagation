@@ -11,6 +11,7 @@ from __future__ import annotations
 import argparse
 import csv
 import hashlib
+import sys
 from pathlib import Path
 
 import numpy as np
@@ -41,18 +42,33 @@ def sample_paths(n: int) -> list[tuple]:
     return out
 
 
-def run(n: int, out_path: Path) -> None:
+def run(n: int, out_path: Path) -> int:
+    """Writes the crosscheck CSV. Returns the number of sampled paths
+    skipped (e.g. a band outside P.533's valid HF frequency range, or any
+    other engine failure) — a skip is logged to stderr and the row omitted,
+    rather than aborting the whole ~100-path run over one bad sample."""
     out_path.parent.mkdir(parents=True, exist_ok=True)
+    skipped = 0
     with out_path.open("w", newline="") as fh:
         w = csv.writer(fh)
         w.writerow(["tx_lat", "tx_lon", "rx_lat", "rx_lon", "band",
                     "month", "hour", "ssn", "reliability_pct", "snr_db"])
         for tx_lat, tx_lon, rx_lat, rx_lon, band, month, hour, ssn in sample_paths(n):
-            r = p533_score(tx_lat=tx_lat, tx_lon=tx_lon, rx_lat=rx_lat,
-                           rx_lon=rx_lon, band=band, month=month,
-                           hour=hour, ssn=ssn)
+            try:
+                r = p533_score(tx_lat=tx_lat, tx_lon=tx_lon, rx_lat=rx_lat,
+                               rx_lon=rx_lon, band=band, month=month,
+                               hour=hour, ssn=ssn)
+            except (RuntimeError, ValueError) as exc:
+                skipped += 1
+                print(
+                    f"skipping ({tx_lat},{tx_lon})->({rx_lat},{rx_lon}) "
+                    f"{band} m={month} h={hour} ssn={ssn}: {exc}",
+                    file=sys.stderr,
+                )
+                continue
             w.writerow([tx_lat, tx_lon, rx_lat, rx_lon, band, month, hour,
                         ssn, r.reliability_pct, r.snr_db])
+    return skipped
 
 
 def main() -> None:
@@ -60,8 +76,10 @@ def main() -> None:
     ap.add_argument("--n", type=int, default=100)
     ap.add_argument("--out", type=Path, default=Path("reports/p533-crosscheck.csv"))
     args = ap.parse_args()
-    run(args.n, args.out)
+    skipped = run(args.n, args.out)
     print(f"wrote {args.out} — compare privately against the cqdx sidecar")
+    if skipped:
+        print(f"skipped {skipped}/{args.n} sampled paths (see stderr for reasons)")
 
 
 if __name__ == "__main__":
