@@ -66,6 +66,10 @@ def test_p533_score_invokes_binary_and_parses(monkeypatch, tmp_path):
 
     def fake_run(cmd, **kwargs):
         seen["cmd"] = cmd
+        # Read the input-card contents now, while the temp dir p533_score
+        # created is still alive — it is cleaned up before p533_score
+        # returns, so the path itself is unreadable afterward.
+        seen["card"] = Path(cmd[1]).read_text()
         # ITURHFProp usage: iturhfprop <input> <output> — write the report.
         Path(cmd[2]).write_text(FIXTURE.read_text())
         return subprocess.CompletedProcess(cmd, 0, stdout="", stderr="")
@@ -77,8 +81,7 @@ def test_p533_score_invokes_binary_and_parses(monkeypatch, tmp_path):
     )
     assert result == P533Result(reliability_pct=78.24, snr_db=-10.2)
     assert "iturhfprop" in Path(seen["cmd"][0]).name
-    card = Path(seen["cmd"][1]).read_text()
-    assert "Path.frequency 14.0740" in card
+    assert "Path.frequency 14.0740" in seen["card"]
 
 
 def test_p533_score_raises_on_nonzero_exit(monkeypatch):

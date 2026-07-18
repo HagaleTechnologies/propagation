@@ -143,29 +143,26 @@ def p533_score(
         tx_lat=tx_lat, tx_lon=tx_lon, rx_lat=rx_lat, rx_lon=rx_lon,
         month=month, hour_utc=hour, ssn=ssn, freq_mhz=freq, data_dir=_data_dir(),
     )
-    # NB: intentionally not `with tempfile.TemporaryDirectory()` — that would
-    # delete the directory (including the rendered input card) before this
-    # function returns to the caller, on every abrupt-completion path
-    # (including `return`), which is exactly the mid-flight state a caller
-    # (or a test double for subprocess.run) may need to inspect for
-    # debugging. The card/report are a few KB of text; leaving them under
-    # the OS temp dir for normal OS-level cleanup is cheap and aids
-    # reproducing a failing ITURHFProp run.
-    td = Path(tempfile.mkdtemp(prefix="p533-"))
-    in_path = td / "in.txt"
-    out_path = td / "out.txt"
-    in_path.write_text(card)
-    env = dict(os.environ)
-    bin_dir = str(binary_path().parent)
-    # shared libs live next to the binary (build.sh); cover both loaders
-    env["LD_LIBRARY_PATH"] = bin_dir + ":" + env.get("LD_LIBRARY_PATH", "")
-    env["DYLD_LIBRARY_PATH"] = bin_dir + ":" + env.get("DYLD_LIBRARY_PATH", "")
-    proc = subprocess.run(
-        [str(binary_path()), str(in_path), str(out_path)],
-        capture_output=True, text=True, timeout=60, env=env,
-    )
-    if proc.returncode != 0:
-        raise RuntimeError(
-            f"iturhfprop exit {proc.returncode}: {proc.stderr[:500]}"
+    # This is the core scoring primitive for the whole M1 P.533 baseline and
+    # will be called thousands of times in batch eval jobs (ROADMAP.md /
+    # ARCHITECTURE.md) — the temp dir must not leak, so it is cleaned up on
+    # every exit path via the context manager.
+    with tempfile.TemporaryDirectory(prefix="p533-") as td_name:
+        td = Path(td_name)
+        in_path = td / "in.txt"
+        out_path = td / "out.txt"
+        in_path.write_text(card)
+        env = dict(os.environ)
+        bin_dir = str(binary_path().parent)
+        # shared libs live next to the binary (build.sh); cover both loaders
+        env["LD_LIBRARY_PATH"] = bin_dir + ":" + env.get("LD_LIBRARY_PATH", "")
+        env["DYLD_LIBRARY_PATH"] = bin_dir + ":" + env.get("DYLD_LIBRARY_PATH", "")
+        proc = subprocess.run(
+            [str(binary_path()), str(in_path), str(out_path)],
+            capture_output=True, text=True, timeout=60, env=env,
         )
-    return parse_report(out_path.read_text())
+        if proc.returncode != 0:
+            raise RuntimeError(
+                f"iturhfprop exit {proc.returncode}: {proc.stderr[:500]}"
+            )
+        return parse_report(out_path.read_text())
