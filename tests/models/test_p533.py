@@ -1,3 +1,4 @@
+import json
 import subprocess
 from pathlib import Path
 
@@ -103,3 +104,50 @@ def test_p533_score_against_real_binary():
     assert 0.0 <= result.reliability_pct <= 100.0
     assert result.reliability_pct > 50.0
     assert -40.0 <= result.snr_db <= 60.0
+
+
+SSN_FIXTURE = Path(__file__).parent.parent / "fixtures" / "swpc_solar_cycle_sample.json"
+
+
+def test_ssn_by_month_prefers_smoothed_falls_back_to_observed(tmp_path, monkeypatch):
+    def fake_get(url, **kwargs):
+        assert url == p533.SWPC_SOLAR_CYCLE_URL
+        class R:
+            status_code = 200
+            def json(self):
+                return json.loads(SSN_FIXTURE.read_text())
+            def raise_for_status(self):
+                pass
+        return R()
+
+    monkeypatch.setattr(p533.httpx, "get", fake_get)
+    out = p533.ssn_by_month(["2026-04", "2026-05"], cache_dir=tmp_path)
+    assert out == {"2026-04": 133.0, "2026-05": 128.7}
+
+
+def test_ssn_by_month_uses_cache_second_time(tmp_path, monkeypatch):
+    calls = []
+
+    def fake_get(url, **kwargs):
+        calls.append(url)
+        class R:
+            status_code = 200
+            def json(self):
+                return json.loads(SSN_FIXTURE.read_text())
+            def raise_for_status(self):
+                pass
+        return R()
+
+    monkeypatch.setattr(p533.httpx, "get", fake_get)
+    p533.ssn_by_month(["2026-04"], cache_dir=tmp_path)
+    p533.ssn_by_month(["2026-04"], cache_dir=tmp_path)
+    assert len(calls) == 1
+
+
+def test_ssn_by_month_raises_on_unknown_month(tmp_path, monkeypatch):
+    monkeypatch.setattr(
+        p533, "_fetch_solar_cycle",
+        lambda cache_dir: json.loads(SSN_FIXTURE.read_text()),
+    )
+    with pytest.raises(KeyError, match="1999-01"):
+        p533.ssn_by_month(["1999-01"], cache_dir=tmp_path)

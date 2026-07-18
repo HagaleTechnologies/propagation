@@ -6,12 +6,15 @@ field-center math. Standalone: no cqdx dependency (README boundaries).
 """
 from __future__ import annotations
 
+import json
 import os
 import re
 import subprocess
 import tempfile
 from dataclasses import dataclass
 from pathlib import Path
+
+import httpx
 
 from propagation.models.p533_build import binary_path, repo_root
 
@@ -166,3 +169,34 @@ def p533_score(
                 f"iturhfprop exit {proc.returncode}: {proc.stderr[:500]}"
             )
         return parse_report(out_path.read_text())
+
+
+SWPC_SOLAR_CYCLE_URL = (
+    "https://services.swpc.noaa.gov/json/solar-cycle/observed-solar-cycle-indices.json"
+)
+
+
+def _fetch_solar_cycle(cache_dir: Path) -> list[dict]:
+    cache = cache_dir / "swpc_solar_cycle.json"
+    if cache.exists():
+        return json.loads(cache.read_text())
+    resp = httpx.get(SWPC_SOLAR_CYCLE_URL, timeout=30)
+    resp.raise_for_status()
+    data = resp.json()
+    cache_dir.mkdir(parents=True, exist_ok=True)
+    cache.write_text(json.dumps(data))
+    return data
+
+
+def ssn_by_month(months: list[str], cache_dir: Path) -> dict[str, float]:
+    """Monthly SSN for 'YYYY-MM' keys: smoothed where published (< 0 means
+    not yet available in the SWPC series), observed otherwise."""
+    rows = {r["time-tag"]: r for r in _fetch_solar_cycle(cache_dir)}
+    out: dict[str, float] = {}
+    for m in months:
+        if m not in rows:
+            raise KeyError(f"no SWPC SSN entry for {m}")
+        r = rows[m]
+        smoothed = r.get("smoothed_ssn", -1.0)
+        out[m] = float(smoothed) if smoothed is not None and smoothed >= 0 else float(r["ssn"])
+    return out
