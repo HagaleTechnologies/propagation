@@ -13,6 +13,9 @@ dependencies = [
     "numpy>=1.26",
 ]
 
+[project.scripts]
+build-p533 = "propagation.models.p533_build:main"
+
 [dependency-groups]
 dev = [
     "pytest>=8.0",
