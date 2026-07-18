@@ -1,12 +1,14 @@
 import json
 import subprocess
+from datetime import datetime, timezone
 from pathlib import Path
 
+import polars as pl
 import pytest
 
 from propagation.data.schema import SUPPORTED_BANDS
 from propagation.models import p533
-from propagation.models.p533 import BAND_FREQ_MHZ, P533Result, parse_report, render_input_card
+from propagation.models.p533 import BAND_FREQ_MHZ, P533Model, P533Result, parse_report, render_input_card
 from propagation.models.p533_build import binary_path
 
 
@@ -151,3 +153,63 @@ def test_ssn_by_month_raises_on_unknown_month(tmp_path, monkeypatch):
     )
     with pytest.raises(KeyError, match="1999-01"):
         p533.ssn_by_month(["1999-01"], cache_dir=tmp_path)
+
+
+def _cells(rows):
+    return pl.DataFrame(
+        rows,
+        schema={
+            "window_start": pl.Datetime("us", "UTC"),
+            "tx_field": pl.Utf8, "rx_field": pl.Utf8, "band": pl.Utf8,
+        },
+        orient="row",
+    )
+
+
+def test_predict_memoizes_by_hour(monkeypatch):
+    calls = []
+
+    def fake_score(tx_lat, tx_lon, rx_lat, rx_lon, band, month, hour, ssn):
+        calls.append((band, month, hour))
+        return P533Result(reliability_pct=80.0, snr_db=10.0)
+
+    monkeypatch.setattr(p533, "p533_score", fake_score)
+    model = P533Model(ssn_by_month={"2026-06": 120.0})
+    ts = datetime(2026, 6, 15, 14, 0, tzinfo=timezone.utc)
+    cells = _cells([
+        (ts, "EM", "PM", "20m"),
+        (ts.replace(minute=15), "EM", "PM", "20m"),   # same hour -> memo hit
+        (ts.replace(minute=30), "EM", "PM", "20m"),
+        (ts.replace(hour=15), "EM", "PM", "20m"),     # new hour -> new call
+    ])
+    out = model.predict(cells)
+    assert out["p_open"].to_list() == [0.8, 0.8, 0.8, 0.8]
+    assert len(calls) == 2  # 4 windows, 2 distinct (month,hour) keys
+    assert out.columns == ["window_start", "tx_field", "rx_field", "band", "p_open"]
+    assert len(out) == 4
+
+
+def test_predict_abstains_when_ssn_month_missing(monkeypatch):
+    monkeypatch.setattr(
+        p533, "p533_score",
+        lambda *a, **k: P533Result(reliability_pct=80.0, snr_db=10.0),
+    )
+    model = P533Model(ssn_by_month={"2026-06": 120.0})
+    cells = _cells([
+        (datetime(2026, 7, 1, 0, 0, tzinfo=timezone.utc), "EM", "PM", "20m"),
+    ])
+    out = model.predict(cells)
+    assert out["p_open"].to_list() == [None]
+
+
+def test_predict_abstains_on_failed_score(monkeypatch):
+    def boom(*a, **k):
+        raise RuntimeError("iturhfprop exit 1: ...")
+
+    monkeypatch.setattr(p533, "p533_score", boom)
+    model = P533Model(ssn_by_month={"2026-06": 120.0})
+    cells = _cells([
+        (datetime(2026, 6, 1, 0, 0, tzinfo=timezone.utc), "EM", "PM", "20m"),
+    ])
+    out = model.predict(cells)
+    assert out["p_open"].to_list() == [None]

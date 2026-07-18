@@ -15,7 +15,9 @@ from dataclasses import dataclass
 from pathlib import Path
 
 import httpx
+import polars as pl
 
+from propagation.data.geo import grid_to_latlon
 from propagation.models.p533_build import binary_path, repo_root
 
 # Primary digital-activity (FT8) dial frequency per band, MHz — the
@@ -200,3 +202,42 @@ def ssn_by_month(months: list[str], cache_dir: Path) -> dict[str, float]:
         smoothed = r.get("smoothed_ssn", -1.0)
         out[m] = float(smoothed) if smoothed is not None and smoothed >= 0 else float(r["ssn"])
     return out
+
+
+class P533Model:
+    """Predictor over ITURHFProp: field-center -> field-center,
+    p_open = BCR/100. Deterministic per (path, band, month, hour, SSN), so
+    results are memoized on that key; SSN is rounded to an integer for the
+    memo key (finer variation is far below P.533's fidelity). Matches
+    ClimatologyModel's predict(cells) -> cells+p_open shape by convention,
+    not by a shared protocol class."""
+
+    def __init__(self, ssn_by_month: dict[str, float]):
+        self._ssn = ssn_by_month          # "YYYY-MM" -> SSN
+        self._memo: dict[tuple, float | None] = {}
+
+    def _score_one(self, tx_field: str, rx_field: str, band: str,
+                   month_key: str, month: int, hour: int) -> float | None:
+        ssn = self._ssn.get(month_key)
+        if ssn is None:
+            return None                   # abstain: no SSN for that month
+        key = (tx_field, rx_field, band, month, hour, round(ssn))
+        if key not in self._memo:
+            tx_lat, tx_lon = grid_to_latlon(tx_field)
+            rx_lat, rx_lon = grid_to_latlon(rx_field)
+            try:
+                res = p533_score(tx_lat, tx_lon, rx_lat, rx_lon,
+                                 band, month, hour, ssn)
+                self._memo[key] = res.reliability_pct / 100.0
+            except (RuntimeError, ValueError):
+                self._memo[key] = None    # abstain on engine failure
+        return self._memo[key]
+
+    def predict(self, labels: pl.DataFrame) -> pl.DataFrame:
+        p = []
+        for ws, tx, rx, band in labels.select(
+            "window_start", "tx_field", "rx_field", "band"
+        ).iter_rows():
+            month_key = f"{ws.year:04d}-{ws.month:02d}"
+            p.append(self._score_one(tx, rx, band, month_key, ws.month, ws.hour))
+        return labels.with_columns(pl.Series("p_open", p, dtype=pl.Float64))
