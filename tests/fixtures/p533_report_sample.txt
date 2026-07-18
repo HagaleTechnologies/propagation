@@ -1,0 +1,142 @@
+---------------------------------------------------------------------------
+ International Telecommunications Union - Radiocommunication Sector (ITU-R)
+     ITURHFProp         Ver Jul 17 2026
+     HF Model (P533)    Ver 14.2
+     Noise Model (P372) Ver 14.3
+     Analysis Prepared  Fri Jul 17 20:43:30 2026
+
+---------------------------------------------------------------------------
+
+***************************** P533 Input Parameters ****************************
+
+	propagation-m1
+	Year          : 2026
+	Month         : July
+	Hour          : 15 (hour UTC)
+	SSN (R12)     : 120
+	Distance      : 10033.017669 (km)
+	dmax          : 4000.000000 (km)
+	Tx power      : 0.100000
+	Tx Location     tx
+	Tx latitude   :  35.000000 N
+	Tx longitude  :  90.000000 W
+	Rx Location     rx
+	Rx latitude   :  45.000000 N
+	Rx longitude  : 135.000000 E
+	local time Rx : 0 (hour UTC)
+	local time Tx : 9 (hour UTC)
+	Frequency     : 14.074000
+	Bandwidth     : 2500.000000
+	Modulation : ANALOG
+	Required signal-to-noise ratio : -21.000000
+	Required % of month signal-to-noise ratio :  99
+	Required signal-to-interference ratio : 0.000000
+	Man-made noise : RURAL
+	Antenna configuration : Transmitter main beam to receiver main beam
+	Path Direction : SHORTPATH
+	Transmit antenna               ISOTROPIC
+	Transmit antenna bearing     : 329.999736
+	Transmit antenna gain offset : 0.000000
+	Receive antenna                ISOTROPIC
+	Receive antenna bearing      : 35.396585
+	Receive antenna gain offset  : 0.000000
+
+************************ End P533 Input Parameters *****************************
+
+************************** ITURHFP Input Parameters *****************************
+
+	Upper left (North West) latitude   :  45.000000 N
+	Upper left (North West) longitude  : 135.000000 E
+	Lower right (South East) latitude  :  45.000000 N
+	Lower right (South East) longitude : 135.000000 E
+	Number of frequencies : 1
+	Number of hours       : 1
+	Number of months      : 1
+	Latitude increment    : 57.295780 (deg)
+	Longitude increment   : 57.295780 (deg)
+
+************************** ITURHFP Input Parameters *****************************
+
+******************************** Data Format ***********************************
+
+Column 01: Month
+Column 02: Hour
+Column 03: Frequency (MHz)
+Column 04: Receiver latitude (deg)
+Column 05: Receiver longitude (deg)
+Column 06: D - Path distance (km)
+Column 07: dmax - Path maximum hop distance (km)
+Column 08: ptick - Slant Path distance (km)
+Column 09: ele - Path minimum Rx elevation angle (deg)
+Column 10: BMUF - Path basic MUF (MHz)
+Column 11: MUF50 - 50% Path basic MUF (MHz)
+Column 12: MUF90 - 90% Path basic MUF (MHz)
+Column 13: MUF10 - 10% Path basic MUF (MHz)
+Column 14: OPMUF - Operation MUF (MHz)
+Column 15: OPMUF90 - 90% Operation MUF (MHz)
+Column 16: OPMUF10 - 10% Operation MUF (MHz)
+Column 17: Lowest order mode for the F2 layer
+Column 18: Lowest order mode for the E layer
+Column 19: E - Path Field Strength (dB(1uV/m))
+Column 20: Pr - Median receiver power (dB)
+Column 21: Grw - Receive Antenna Gain (dbi)
+Column 22: FaA - Atmospheric noise (dB)
+Column 23: FaM - Man-made noise (dB)
+Column 24: FaG - Galactic noise (dB)
+Column 25: DuA - Upper decile deviation of atmospheric noise (dB)
+Column 26: DlA - Lower decile deviation of atmospheric noise (dB)
+Column 27: DuM - Upper decile deviation of man-made noise (dB)
+Column 28: DlM - Lower decile deviation of man-made noise (dB)
+Column 29: DuG - Upper decile deviation of atmospheric noise (dB)
+Column 30: DlG - Lower decile deviation of atmospheric noise (dB)
+Column 31: DuT - Upper decile deviation of total noise (dB)
+Column 32: DlT - Lower decile deviation of total noise (dB)
+Column 33: FamT - Total noise (dB)
+Column 34: SNR - Median signal-to-noise ratio (dB)
+Column 35: DuSN - Upper decile deviation of signal-to-noise ratio (dB)
+Column 36: DlSN - Lower decile deviation of signal-to-noise ratio (dB)
+Column 37: SNRXXp - Signal-to-noise ratio at 99% of month
+Column 38: SIR - Signal-to-interference ratio (dB)
+Column 39: DuSI - Upper decile deviation of signal-to-interference ratio (dB)
+Column 40: DlSI - Lower decile deviation of signal-to-interference ratio (dB)
+Column 41: RSN - Probability that the required SNR is achieved (%)
+Column 42: RT - Probability that the required time spread T0 is not exceeded (%)
+Column 43: RF - Probability that the required frequency spread f0 is not exceeded (%)
+Column 44: BCR - Basic circuit reliability (%)
+Column 45: OCR - Overall circuit reliability not considering scattering (%)
+Column 46: OCRs - Overall circuit reliability considering scattering (%)
+Column 47: Probocc - Probability of scattering (%)
+Column 48: MIR - Multimode Interference (%)
+Column 49: Dominant mode
+Column 50: Dominant mode - Elevation angle (deg)
+Column 51: Dominant mode - Delay (mS)
+Column 52: Dominant mode - Loss (dB)
+Column 53: Dominant mode - Propagation probability (%)
+Column 54: Dominant mode - Virtual height (km)
+Column 55: Dominant mode - Median received power (dB)
+Column 56: Dominant mode - Receiver Antenna Gain (dBi)
+Column 57: Dominant mode - Field Strength (dB(1uV/m))
+Column 58: Dominant mode - Basic MUF (MHz)
+Column 59: Short Path (<=7000 km) Field Strength (dB(1uV/m))
+Column 60: Long Path (>9000km) Field Strength (dB(1uV/m))
+Column 61: Free-space Field Strength 3 MW e.i.r.p. (dB(1uV/m)
+Column 62: Increased Long Distance Field Strength due to Focusing (dB)
+Column 63: "Not otherwise included loss" (dB)
+Column 64: Upper Reference Frequency (MHz)
+Column 65: Lower Reference Frequency (MHz)
+Column 66: Correction Factor at T + d0/2
+Column 67: Correction Factor at R - d0/2
+Column 68: Max Antenna Gain G_tl (0 - 8 deg)
+Column 69: Max Antenna Gain G_rw (0 - 8 deg)
+Column 70: Mean gyrofrequency
+Column 71: Scale factor f(f ,fL, fM, fH)
+
+************************** End Data Format ********************************
+
+************************ Calculated Parameters ****************************
+
+07, 15,   14.074,  45.0000, 135.0000, 10033.02, 4000.00, 10527.18,   0.00,  16.00,  16.00,  12.32,  19.68,  24.60,  18.94,  30.26, NONE , NONE , -13.60,-143.77,   0.00,  27.75,  35.39,  25.59,   4.69,   4.04,   9.20,   4.60,   2.00,   2.00,   8.92,   3.94,  36.12, -10.20,  12.81,  19.80, -46.13,-307.00,-307.00,-307.00,   0.00,   0.00,   0.00,  78.24,   0.00,   0.00,   0.00,-307.00, NONE ,   0.00,   0.00,   0.00,   0.00,   0.00,   0.00,   0.00,   0.00,   0.00,-307.0000, -13.6029,  59.1538,   1.9723,  -0.1700,  24.6038,  10.1571,   1.5378,   1.7863,   0.0000,   0.0000,   1.3667,   0.2393
+
+**************************End Calculated Parameters ***********************
+
+

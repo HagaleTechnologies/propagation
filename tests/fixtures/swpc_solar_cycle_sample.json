@@ -1,0 +1,5 @@
+[
+  {"time-tag": "2026-04", "ssn": 141.2, "smoothed_ssn": 133.0, "f10.7": 180.1, "smoothed_f10.7": 175.5},
+  {"time-tag": "2026-05", "ssn": 128.7, "smoothed_ssn": -1.0,  "f10.7": 171.3, "smoothed_f10.7": -1.0},
+  {"time-tag": "2026-06", "ssn": 119.4, "smoothed_ssn": -1.0,  "f10.7": 165.0, "smoothed_f10.7": -1.0}
+]

@@ -79,6 +79,14 @@ The boundary is deliberate and enforced:
   terms (non-commercial spirit, attribution, don't hammer the servers). This repo
   ships *code* and *derived model artifacts*, not redistributed raw spot dumps;
   extraction scripts pull from the canonical public archives and cache locally.
+- **`baselines/p533/upstream/` is a license carve-out.** The vendored
+  ITURHFProp tree (ITU-R P.533-14 reference implementation) ships no LICENSE
+  file and is not MIT/Apache-2.0 — it carries the ITU's own implementer-scoped
+  grant, stated inline in `upstream/README.md`. See
+  `baselines/p533/PROVENANCE.md` for the exact terms and
+  `docs/DECISIONS/0001-iturhfprop-license-carveout.md` for the decision
+  record. This applies only to that vendored subtree; the Python wrapper
+  around it is ordinary repo code under the dual license above.
 
 See [ARCHITECTURE.md](ARCHITECTURE.md) for the full design and
 [ROADMAP.md](ROADMAP.md) for milestones.

@@ -13,6 +13,9 @@ dependencies = [
     "numpy>=1.26",
 ]
 
+[project.scripts]
+build-p533 = "propagation.models.p533_build:main"
+
 [dependency-groups]
 dev = [
     "pytest>=8.0",
@@ -22,6 +25,7 @@ dev = [
 [tool.ruff]
 line-length = 100
 target-version = "py311"
+extend-exclude = ["baselines/p533/upstream"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
