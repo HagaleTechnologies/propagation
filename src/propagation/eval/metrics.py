@@ -1,5 +1,7 @@
 import numpy as np
 
+from sklearn.metrics import average_precision_score
+
 
 def brier_score(y_true: np.ndarray, y_prob: np.ndarray) -> float:
     return float(np.mean((y_prob - y_true) ** 2))
@@ -26,3 +28,7 @@ def reliability_bins(y_true: np.ndarray, y_prob: np.ndarray, n_bins: int = 10) -
             "observed_rate": float(y_true[mask].mean()) if n else None,
         })
     return bins
+
+
+def pr_auc_score(y_true: np.ndarray, y_prob: np.ndarray) -> float:
+    return float(average_precision_score(y_true, y_prob))
