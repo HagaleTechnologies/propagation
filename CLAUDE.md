@@ -10,7 +10,9 @@ sampling that handles observation bias.
 
 M0 complete (PR #11): WSPRnet extraction, monitor-normalized labeling,
 climatology baseline, and eval harness run end-to-end via `scripts/run_m0.py`.
-Next step is M1 in ROADMAP.md (vendored ITURHFProp P.533 baseline).
+M1 complete (PR #13, with live-run fixes in #14–#16): vendored ITU-R P.533
+baseline, `scripts/eval_m1.py` producing overall/storm/quiet headline
+reports. Next step is M2 in ROADMAP.md (LightGBM feature matrix).
 
 ## Documents (read in this order)
 

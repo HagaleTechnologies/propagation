@@ -8,8 +8,8 @@ sources:
   - README.md
   - ARCHITECTURE.md
 verified:
-  commit: 5c2dac7
-  date: 2026-07-07
+  commit: 5431900
+  date: 2026-07-19
 links:
   - overview
   - interface-prediction-surface

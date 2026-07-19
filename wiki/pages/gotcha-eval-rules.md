@@ -8,11 +8,12 @@ sources:
   - ARCHITECTURE.md
   - docs/SPEC-labeling.md
 verified:
-  commit: 5c2dac7
-  date: 2026-07-07
+  commit: 5431900
+  date: 2026-07-19
 links:
   - overview
   - decision-monitor-normalized-negatives
+  - decision-p533-baseline
 ---
 Three eval rules will produce silently invalid results if violated: (1) random
 train/test splits are forbidden — autoregressive features leak through them;
@@ -51,4 +52,10 @@ Normative rules (ARCHITECTURE.md §6, docs/SPEC-labeling.md §6):
   ARCHITECTURE.md §6 and ROADMAP.md M2/M3.
 - **Storm fold requirement**: headline eval MUST include ≥1 storm fold
   (docs/SPEC-labeling.md §6, leakage rule 5). Storms are where climatology
-  fails hardest and the model should win biggest.
+  fails hardest and the model should win biggest. **Verify the month
+  actually contains a storm before trusting the slice** — M1's first live
+  run reused M0's eval month and technically cleared "≥1 storm fold" with
+  exactly one grazing 3-hour Kp=5.333 block, which produced a flat,
+  inconclusive storm-vs-quiet comparison. A real event (checked against
+  `propagation.eval.stratify.fetch_definitive_kp()` beforehand) showed the
+  expected result clearly. See docs/DECISIONS/0002.

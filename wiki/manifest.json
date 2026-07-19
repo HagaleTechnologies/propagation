@@ -1,6 +1,6 @@
 {
-  "generated_at": "2026-07-15T01:28:52Z",
-  "head_commit": "c4cdacb",
+  "generated_at": "2026-07-19T02:40:57Z",
+  "head_commit": "5431900",
   "pages": [
     {
       "hash": "sha256:eebe8dc967e6a0c6fc179da2849d4275b78f6fbd4c785034ffcdf62b5c3545e1",
@@ -47,12 +47,14 @@
       "visibility": "private"
     },
     {
-      "hash": "sha256:175b0db526eba0aebe2b7015eb736b39eeb160dea82de0bbc6b654b92e2c93e7",
+      "hash": "sha256:38fae55a48d3b29d292c19b4abdbff0687d7730d51433a15582d1ba84e79bba9",
       "id": "decision-p533-baseline",
       "kind": "decision-digest",
       "links": [
         "overview",
-        "gotcha-open-closed-boundary"
+        "gotcha-open-closed-boundary",
+        "gotcha-eval-rules",
+        "gotcha-live-system-bugs"
       ],
       "locked": false,
       "maintainer": "agent",
@@ -63,8 +65,8 @@
       ],
       "status": "current",
       "title": "Why is ITURHFProp vendored here rather than calling cqdx's P.533 sidecar?",
-      "verified_commit": "5c2dac7",
-      "verified_date": "2026-07-07",
+      "verified_commit": "5431900",
+      "verified_date": "2026-07-19",
       "visibility": "private"
     },
     {
@@ -89,12 +91,33 @@
       "visibility": "private"
     },
     {
-      "hash": "sha256:9b4efdae80eead81d8d0801888053992c6532fa1e175bf22c6b46b91281f9b46",
+      "hash": "sha256:c552f363658b3c11e5d11ff683f02c4feee6bdbb1c4b90d94360ddb0a6c0237a",
+      "id": "gotcha-auto-merge-workflow",
+      "kind": "gotcha",
+      "links": [
+        "overview"
+      ],
+      "locked": false,
+      "maintainer": "agent",
+      "path": "pages/gotcha-auto-merge-workflow.md",
+      "sources": [
+        ".github/workflows/auto-merge-own-prs.yml",
+        ".github/workflows/ci.yml"
+      ],
+      "status": "current",
+      "title": "What will bite you about this repo's auto-merge-on-open workflow?",
+      "verified_commit": "5431900",
+      "verified_date": "2026-07-19",
+      "visibility": "private"
+    },
+    {
+      "hash": "sha256:34c52b67951f4ab169e8c9a6a1df38050f1c10db1f10efc4b9ba5ed7b7243d7d",
       "id": "gotcha-eval-rules",
       "kind": "gotcha",
       "links": [
         "overview",
-        "decision-monitor-normalized-negatives"
+        "decision-monitor-normalized-negatives",
+        "decision-p533-baseline"
       ],
       "locked": false,
       "maintainer": "agent",
@@ -105,8 +128,29 @@
       ],
       "status": "current",
       "title": "What will bite you about evaluation (blocked CV, full label set)?",
-      "verified_commit": "5c2dac7",
-      "verified_date": "2026-07-07",
+      "verified_commit": "5431900",
+      "verified_date": "2026-07-19",
+      "visibility": "private"
+    },
+    {
+      "hash": "sha256:595d8db40e89d9cbcb67c572ca7858800d5847dddfa32c0d31afe5c879822d94",
+      "id": "gotcha-live-system-bugs",
+      "kind": "gotcha",
+      "links": [
+        "decision-p533-baseline",
+        "overview"
+      ],
+      "locked": false,
+      "maintainer": "agent",
+      "path": "pages/gotcha-live-system-bugs.md",
+      "sources": [
+        "src/propagation/models/p533.py",
+        "src/propagation/eval/stratify.py"
+      ],
+      "status": "current",
+      "title": "What will bite you if you only test against mocked externals/binaries?",
+      "verified_commit": "5431900",
+      "verified_date": "2026-07-19",
       "visibility": "private"
     },
     {
@@ -126,8 +170,28 @@
       ],
       "status": "current",
       "title": "What will bite you if you add a cqdx dependency?",
-      "verified_commit": "5c2dac7",
-      "verified_date": "2026-07-07",
+      "verified_commit": "5431900",
+      "verified_date": "2026-07-19",
+      "visibility": "private"
+    },
+    {
+      "hash": "sha256:9e45076a419cb846d7c1ea4d0612893cbc33ca844683aa19ea3417330cde7111",
+      "id": "gotcha-plan-drift-before-merge",
+      "kind": "gotcha",
+      "links": [
+        "decision-p533-baseline",
+        "overview"
+      ],
+      "locked": false,
+      "maintainer": "agent",
+      "path": "pages/gotcha-plan-drift-before-merge.md",
+      "sources": [
+        "docs/superpowers/plans/2026-07-15-m1-p533-baseline.md"
+      ],
+      "status": "current",
+      "title": "What will bite you about implementing from a plan drafted before its dependencies merged?",
+      "verified_commit": "5431900",
+      "verified_date": "2026-07-19",
       "visibility": "private"
     },
     {
@@ -173,10 +237,13 @@
       "visibility": "private"
     },
     {
-      "hash": "sha256:1de169199500e2320b61b158e44212f3f7d659a818ba628da950b52eee73a421",
+      "hash": "sha256:710dab4f72a2ba91c434a06e6a89a0217204542673b9e1960d144c675a9c6d8a",
       "id": "overview",
       "kind": "overview",
-      "links": [],
+      "links": [
+        "decision-p533-baseline",
+        "question-p533-worse-than-climatology"
+      ],
       "locked": false,
       "maintainer": "agent",
       "path": "pages/overview.md",
@@ -188,8 +255,28 @@
       ],
       "status": "current",
       "title": "propagation \u2014 what is this and where do things live?",
-      "verified_commit": "5f75677",
-      "verified_date": "2026-07-14",
+      "verified_commit": "5431900",
+      "verified_date": "2026-07-19",
+      "visibility": "private"
+    },
+    {
+      "hash": "sha256:8c2530a73229de63d19530250d99d42f415e1bf000b1db4bf3d51094ffedb21a",
+      "id": "question-p533-worse-than-climatology",
+      "kind": "question",
+      "links": [
+        "decision-p533-baseline",
+        "gotcha-eval-rules"
+      ],
+      "locked": false,
+      "maintainer": "agent",
+      "path": "pages/question-p533-worse-than-climatology.md",
+      "sources": [
+        "ARCHITECTURE.md"
+      ],
+      "status": "draft",
+      "title": "Does M1 clear ARCHITECTURE.md's \"each rung must beat the previous\" gate?",
+      "verified_commit": "5431900",
+      "verified_date": "2026-07-19",
       "visibility": "private"
     },
     {
