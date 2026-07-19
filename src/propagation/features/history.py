@@ -12,10 +12,11 @@ window closes 15 minutes after its own window_start and needs a further
 5-minute availability buffer, so a source row is only usable as history for
 a target row at time T if source.window_start <= T - AVAIL_BUFFER_MIN.
 Implemented via two rolling sums per lookback L (full window [T-L, T) minus
-the buffer zone [T-buffer, T), leaving exactly [T-L, T-buffer)) rather than
-a single shifted-anchor rolling sum, since polars' rolling_sum_by is
-self-referential on one time column and can't offset the window's own
-anchor point independently of its span.
+the open buffer zone (T-buffer, T), leaving exactly [T-L, T-buffer] --
+closed at T-buffer, per the <= above) rather than a single shifted-anchor
+rolling sum, since polars' rolling_sum_by is self-referential on one time
+column and can't offset the window's own anchor point independently of its
+span.
 
 Note: polars' rolling_sum_by only evaluates a window AT rows that already
 exist in the frame being rolled over. A naive implementation that computes
@@ -120,11 +121,11 @@ def _rolling_n_and_snr(
     out_names = []
     for suffix, window in _LOOKBACKS.items():
         n_full = pl.col("n_spots").rolling_sum_by("window_start", window_size=window, closed="left").over(key_cols)
-        n_buf = pl.col("n_spots").rolling_sum_by("window_start", window_size=buffer_str, closed="left").over(key_cols)
+        n_buf = pl.col("n_spots").rolling_sum_by("window_start", window_size=buffer_str, closed="none").over(key_cols)
         w_full = pl.col("_snr_weighted").rolling_sum_by("window_start", window_size=window, closed="left").over(key_cols)
-        w_buf = pl.col("_snr_weighted").rolling_sum_by("window_start", window_size=buffer_str, closed="left").over(key_cols)
+        w_buf = pl.col("_snr_weighted").rolling_sum_by("window_start", window_size=buffer_str, closed="none").over(key_cols)
         d_full = pl.col("_snr_weight").rolling_sum_by("window_start", window_size=window, closed="left").over(key_cols)
-        d_buf = pl.col("_snr_weight").rolling_sum_by("window_start", window_size=buffer_str, closed="left").over(key_cols)
+        d_buf = pl.col("_snr_weight").rolling_sum_by("window_start", window_size=buffer_str, closed="none").over(key_cols)
 
         n_name = f"{prefix}_n_{suffix}"
         snr_name = f"{prefix}_snr_{suffix}"
