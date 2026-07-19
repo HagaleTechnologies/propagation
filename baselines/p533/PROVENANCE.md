@@ -33,6 +33,15 @@
     compile time, it `dlopen()`s them by bare filename at runtime — see
     `build.sh` for the full note and the runtime env var requirement this
     implies for Task 4's subprocess wrapper.
+  - `build.sh`'s `CFLAGS` includes `-fcommon`: several
+    `ITURHFProp/Src/ITURHFProp/*.c` files declare the same `dll*`/`hLib`
+    function-pointer globals (for runtime `dlsym` resolution of the noise
+    library) without `extern`, so each translation unit tentatively defines
+    them. GCC 10+ on Linux defaults to `-fno-common` and fails this as
+    "multiple definition" link errors (macOS's clang-based `cc` doesn't hit
+    it the same way, which is why this wasn't caught until CI ran on
+    Linux). `-fcommon` restores the traditional tentative-definition
+    merging this legacy C relies on; no vendored source was patched.
   - No patches to any vendored `.c`/`.h` file. Any future patch must be
     listed here with a rationale and kept in `baselines/p533/patches/`.
   - The vendored tree is a **trimmed subset** of the upstream clone, not a
