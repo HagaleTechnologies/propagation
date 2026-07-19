@@ -1,6 +1,6 @@
 {
-  "generated_at": "2026-07-19T02:40:57Z",
-  "head_commit": "5431900",
+  "generated_at": "2026-07-19T04:21:07Z",
+  "head_commit": "f6ae8c3",
   "pages": [
     {
       "hash": "sha256:eebe8dc967e6a0c6fc179da2849d4275b78f6fbd4c785034ffcdf62b5c3545e1",
@@ -26,6 +26,27 @@
       "visibility": "private"
     },
     {
+      "hash": "sha256:d389bd45b0c8f2d4a77e72a3a1e1d5ec9cded80588f9926c2c9fe9603983c646",
+      "id": "decision-m1-ladder-exception",
+      "kind": "decision-digest",
+      "links": [
+        "decision-p533-baseline",
+        "overview"
+      ],
+      "locked": false,
+      "maintainer": "agent",
+      "path": "pages/decision-m1-ladder-exception.md",
+      "sources": [
+        "ARCHITECTURE.md",
+        "docs/DECISIONS/0003-m1-ladder-exception.md"
+      ],
+      "status": "current",
+      "title": "Why did M2 start despite M1 not beating M0 on the eval harness?",
+      "verified_commit": "f6ae8c3",
+      "verified_date": "2026-07-19",
+      "visibility": "private"
+    },
+    {
       "hash": "sha256:16964996ec0ce3981c1dc68dd6c3cda6f2a8ef7ea40640a3af80827dcb7f85fc",
       "id": "decision-monitor-normalized-negatives",
       "kind": "decision-digest",
@@ -47,7 +68,7 @@
       "visibility": "private"
     },
     {
-      "hash": "sha256:38fae55a48d3b29d292c19b4abdbff0687d7730d51433a15582d1ba84e79bba9",
+      "hash": "sha256:5421cdb9e74f65a776cb8ede63e7c6d187a4af63c953857909e2c04b5c66e1e4",
       "id": "decision-p533-baseline",
       "kind": "decision-digest",
       "links": [
@@ -237,12 +258,12 @@
       "visibility": "private"
     },
     {
-      "hash": "sha256:710dab4f72a2ba91c434a06e6a89a0217204542673b9e1960d144c675a9c6d8a",
+      "hash": "sha256:0fd7c0f4fa270e0650648333c6a23d5dc6aeaa96e71972760516c524d749fadf",
       "id": "overview",
       "kind": "overview",
       "links": [
         "decision-p533-baseline",
-        "question-p533-worse-than-climatology"
+        "decision-m1-ladder-exception"
       ],
       "locked": false,
       "maintainer": "agent",
@@ -255,27 +276,7 @@
       ],
       "status": "current",
       "title": "propagation \u2014 what is this and where do things live?",
-      "verified_commit": "5431900",
-      "verified_date": "2026-07-19",
-      "visibility": "private"
-    },
-    {
-      "hash": "sha256:8c2530a73229de63d19530250d99d42f415e1bf000b1db4bf3d51094ffedb21a",
-      "id": "question-p533-worse-than-climatology",
-      "kind": "question",
-      "links": [
-        "decision-p533-baseline",
-        "gotcha-eval-rules"
-      ],
-      "locked": false,
-      "maintainer": "agent",
-      "path": "pages/question-p533-worse-than-climatology.md",
-      "sources": [
-        "ARCHITECTURE.md"
-      ],
-      "status": "draft",
-      "title": "Does M1 clear ARCHITECTURE.md's \"each rung must beat the previous\" gate?",
-      "verified_commit": "5431900",
+      "verified_commit": "f6ae8c3",
       "verified_date": "2026-07-19",
       "visibility": "private"
     },

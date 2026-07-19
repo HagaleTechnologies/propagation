@@ -194,7 +194,10 @@ Per (path-cell, window, horizon):
 ## 5. Modeling ladder
 
 Strictly ordered; each rung must beat the previous on the eval harness before
-moving on.
+moving on. **Exception on record:** M1's real eval result has P.533 losing
+badly to climatology, not beating it (`docs/DECISIONS/0003`); M2 proceeded
+anyway by explicit decision rather than by satisfying this rule literally.
+M2's own bar (beats both M-0 and M-1) is unaffected.
 
 - **M-0 Climatology**: P(open) = historical open-rate for (path-cell, band,
   hour-of-day, month) at similar smoothed SSN. Embarrassingly strong baseline;

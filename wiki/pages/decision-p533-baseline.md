@@ -56,6 +56,6 @@ acceptance run caught that no mocked test did.
 **Modeling ladder order** (ARCHITECTURE.md §5): "Strictly ordered; each rung
 must beat the previous on the eval harness before moving on." M1's actual
 result does NOT satisfy this literally — P.533 loses badly to climatology,
-not beats it — which is a real tension between the ladder rule as written
-and what happened; see [[question-p533-worse-than-climatology]] for the open
-question this raises before treating M1 as cleared to advance past.
+not beats it. Tony explicitly decided to proceed to M2 anyway rather than
+amend the rule or recalibrate P.533 first — see
+[[decision-m1-ladder-exception]] and docs/DECISIONS/0003.
