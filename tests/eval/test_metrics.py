@@ -1,7 +1,7 @@
 import numpy as np
 import pytest
 
-from propagation.eval.metrics import brier_score, log_loss_score, reliability_bins
+from propagation.eval.metrics import brier_score, log_loss_score, reliability_bins, pr_auc_score
 
 
 def test_brier_score_perfect_predictions():
@@ -36,3 +36,16 @@ def test_reliability_bins_shape_and_calibration():
     assert len(bins) == 10
     high_bin = [b for b in bins if b["n"] and b["lo"] >= 0.8][0]
     assert high_bin["observed_rate"] == pytest.approx(0.5)
+
+
+def test_pr_auc_perfect_classifier_scores_1():
+    y_true = np.array([0, 0, 1, 1])
+    y_prob = np.array([0.1, 0.2, 0.8, 0.9])
+    assert pr_auc_score(y_true, y_prob) == pytest.approx(1.0)
+
+
+def test_pr_auc_random_classifier_scores_near_base_rate():
+    rng = np.random.default_rng(0)
+    y_true = (rng.uniform(size=5000) < 0.3).astype(float)
+    y_prob = rng.uniform(size=5000)  # uninformative
+    assert pr_auc_score(y_true, y_prob) == pytest.approx(0.3, abs=0.05)

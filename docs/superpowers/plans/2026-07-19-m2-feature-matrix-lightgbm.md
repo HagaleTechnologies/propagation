@@ -312,9 +312,14 @@ git commit -m "feat(features): path geometry (distance, bearing, control points,
   times, which is all a simplified NOAA-style solar position formula needs).
 - Produces: `solar_zenith_deg(lat: float, lon: float, when: datetime) -> float`;
   `add_solar_features(labels: pl.DataFrame) -> pl.DataFrame` (adds
-  `tx_solar_zenith, rx_solar_zenith, midpoint_solar_zenith, tx_control_solar_zenith,
-  rx_control_solar_zenith, path_daylight_fraction, midpoint_hours_since_terminator` —
-  7 new columns; requires geometry columns to already be present, i.e. run after Task 1).
+  `midpoint_solar_zenith, tx_control_solar_zenith, rx_control_solar_zenith,
+  path_daylight_fraction, midpoint_hours_since_terminator` — 5 new columns;
+  requires geometry columns to already be present, i.e. run after Task 1.
+  No separate `tx_solar_zenith`/`rx_solar_zenith` — this module only has
+  access to control-point and midpoint lat/lon from Task 1's output, not
+  raw terminus lat/lon, so a "terminus zenith" would just duplicate the
+  control-point zenith; the control points are the physically meaningful
+  sampling locations for HF propagation anyway, per P.533's own convention).
 
 - [ ] **Step 1: Write the failing tests**
 
@@ -353,10 +358,10 @@ def test_add_solar_features_requires_geometry_columns():
     }, schema_overrides={"window_start": pl.Datetime("us", "UTC")})
     with_geo = add_geometry_features(labels)
     out = add_solar_features(with_geo)
-    for col in ("tx_solar_zenith", "rx_solar_zenith", "midpoint_solar_zenith",
-                "tx_control_solar_zenith", "rx_control_solar_zenith",
+    for col in ("midpoint_solar_zenith", "tx_control_solar_zenith", "rx_control_solar_zenith",
                 "path_daylight_fraction", "midpoint_hours_since_terminator"):
         assert col in out.columns, col
+    assert "tx_solar_zenith" not in out.columns  # would just duplicate tx_control_solar_zenith
     assert 0.0 <= out["path_daylight_fraction"][0] <= 1.0
 ```
 
@@ -433,40 +438,39 @@ def _hours_since_terminator(lat: float, lon: float, when) -> float:
 
 
 def add_solar_features(labels: pl.DataFrame) -> pl.DataFrame:
-    """Requires tx_geomag_lat-style geometry columns to already be present
-    (run after features.geometry.add_geometry_features): tx/rx/midpoint/
-    control-point lat+lon and window_start. Computed per row (solar position
-    depends on the actual prediction time, not just the static path)."""
+    """Requires geometry columns to already be present (run after
+    features.geometry.add_geometry_features): midpoint/control-point lat+lon
+    and window_start. Computed per row (solar position depends on the
+    actual prediction time, not just the static path).
+
+    Zenith is computed at the control points (nearest each terminus) and
+    the midpoint -- the physically relevant sampling locations for D-layer
+    absorption along the path, matching P.533's own convention. There is no
+    separate "terminus zenith": this module only has control-point/midpoint
+    lat-lon available from Task 1's output, and a terminus zenith would
+    just duplicate the control-point zenith, wasting model capacity on a
+    collinear column.
+    """
     rows = []
     for r in labels.select(
         "window_start", "midpoint_lat", "midpoint_lon",
         "tx_control_lat", "tx_control_lon", "rx_control_lat", "rx_control_lon",
     ).iter_rows(named=True):
-        # tx/rx zenith use the terminus's own field-center lat/lon; the
-        # frame passed in carries midpoint/control points but not the raw
-        # tx/rx lat/lon, so callers building the full matrix (Task 7) pass
-        # tx_lat/tx_lon/rx_lat/rx_lon through geometry first if tx/rx zenith
-        # (as opposed to control-point zenith) is wanted per-row -- for this
-        # module, tx/rx zenith are computed at the control points nearest
-        # each terminus, which is the physically relevant point for D-layer
-        # absorption at that end of the path anyway.
         w = r["window_start"]
         tx_z = solar_zenith_deg(r["tx_control_lat"], r["tx_control_lon"], w)
         rx_z = solar_zenith_deg(r["rx_control_lat"], r["rx_control_lon"], w)
         mid_z = solar_zenith_deg(r["midpoint_lat"], r["midpoint_lon"], w)
-        daylight = 1.0 if mid_z < 90.0 else 0.0
-        # path_daylight_fraction: crude proxy = fraction of {tx, rx, mid} in daylight
+        # path_daylight_fraction: crude proxy = fraction of {tx_control, rx_control, mid} in daylight
         frac = sum(z < 90.0 for z in (tx_z, rx_z, mid_z)) / 3.0
         hrs = _hours_since_terminator(r["midpoint_lat"], r["midpoint_lon"], w)
-        rows.append((tx_z, rx_z, mid_z, tx_z, rx_z, frac, hrs))
+        rows.append((mid_z, tx_z, rx_z, frac, hrs))
     solar = pl.DataFrame(
         rows,
-        schema=["tx_solar_zenith", "rx_solar_zenith", "midpoint_solar_zenith",
-                "tx_control_solar_zenith", "rx_control_solar_zenith",
+        schema=["midpoint_solar_zenith", "tx_control_solar_zenith", "rx_control_solar_zenith",
                 "path_daylight_fraction", "midpoint_hours_since_terminator"],
         orient="row",
     )
-    return pl.concat([labels, solar], how="horizontal")
+    return pl.concat([labels, solar], how="horizontal_extend")
 ```
 
 - [ ] **Step 4: Run tests to verify they pass**
@@ -867,7 +871,7 @@ def add_spaceweather_features(labels: pl.DataFrame, omni: pl.DataFrame) -> pl.Da
          other_now.rename({"f107": "f107_daily", "bz_gsm": "bz_gsm_now",
                             "solar_wind_speed": "solar_wind_speed_now", "dst": "dst_now"}),
          f107_smoothed],
-        how="horizontal",
+        how="horizontal_extend",
     )
     return out
 ```
@@ -1359,8 +1363,7 @@ _GEOMETRY_COLS = [
     "tx_geomag_lat", "rx_geomag_lat", "midpoint_geomag_lat",
 ]
 _SOLAR_COLS = [
-    "tx_solar_zenith", "rx_solar_zenith", "midpoint_solar_zenith",
-    "tx_control_solar_zenith", "rx_control_solar_zenith",
+    "midpoint_solar_zenith", "tx_control_solar_zenith", "rx_control_solar_zenith",
     "path_daylight_fraction", "midpoint_hours_since_terminator",
 ]
 _SPACEWEATHER_COLS = [
