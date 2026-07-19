@@ -62,3 +62,9 @@ solar-dependent — the hard case worth proving early).
 - GIRO ionosonde foF2 assimilation features.
 - Finer cells (grid4) where density allows; long-path handling.
 - Public model artifact releases + a small "current conditions" public page.
+- GOES X-ray flux feature (flare → D-layer absorption, ARCHITECTURE.md §4
+  item 4): deferred out of M2 — its historical archive is NetCDF-based and
+  meaningfully heavier to integrate than OMNI2 (which already covers M2's
+  other space-weather features in one place). Stays in scope for the
+  project; add when there's a concrete reason to prioritize the integration
+  work, not silently dropped.
