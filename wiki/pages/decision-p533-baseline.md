@@ -8,11 +8,13 @@ sources:
   - ARCHITECTURE.md
   - ROADMAP.md
 verified:
-  commit: 5c2dac7
-  date: 2026-07-07
+  commit: 5431900
+  date: 2026-07-19
 links:
   - overview
   - gotcha-open-closed-boundary
+  - gotcha-eval-rules
+  - gotcha-live-system-bugs
 ---
 The P.533 baseline is implemented by vendoring the ITU's public ITURHFProp C
 source directly under `baselines/p533/` (a CLI wrapper scored against path-cells
@@ -36,11 +38,24 @@ ARCHITECTURE.md §5 (M-1 modeling ladder entry).
   agree — that agreement is a private sanity cross-check (~100 paths spot-check
   per ROADMAP.md M1), not a production dependency.
 
-**M1 acceptance criteria** (ROADMAP.md): the headline eval table has two rows
-(climatology, P.533) with real numbers, and P.533's storm-time failure is
-visible in the Kp ≥ 5 slice. This table is the paper and the launch blog post.
+**M1 shipped** (PR #13, live-run fixes in #14): `scripts/eval_m1.py` produces
+the headline table (climatology vs. P.533, overall/storm/quiet slices) via
+`baselines/p533/` + `propagation.models.p533.P533Model`. P.533 does NOT beat
+climatology — it is both less accurate and systematically overconfident
+(its own highest-confidence bin only opens ~25–52% of the time depending on
+eval month, not the ~98% it predicts). The likely cause: P.533's BCR answers
+"is this path physically capable," while the labels answer "did a real
+operator transmit and a real monitor hear it in this window" — exactly the
+observation-bias gap this repo's labeling methodology exists to model, which
+a pure physics baseline has no way to see. This is the expected, useful
+result: it's the gap M2 (LightGBM, conditioned on real activity/monitor
+data) needs to close. See [[gotcha-eval-rules]] for the storm-slice
+methodology lesson (0002) and [[gotcha-live-system-bugs]] for bugs the live
+acceptance run caught that no mocked test did.
 
-**Modeling ladder order** (ARCHITECTURE.md §5): M-0 climatology must be in place
-and evaluated before M-1 P.533 work starts. M-1 must beat M-0 in the eval
-harness before M-2 (LightGBM) begins. Milestones are strictly ordered —
-do not skip rungs.
+**Modeling ladder order** (ARCHITECTURE.md §5): "Strictly ordered; each rung
+must beat the previous on the eval harness before moving on." M1's actual
+result does NOT satisfy this literally — P.533 loses badly to climatology,
+not beats it — which is a real tension between the ladder rule as written
+and what happened; see [[question-p533-worse-than-climatology]] for the open
+question this raises before treating M1 as cleared to advance past.
