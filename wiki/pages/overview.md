@@ -10,11 +10,11 @@ sources:
   - ROADMAP.md
   - CLAUDE.md
 verified:
-  commit: 5431900
+  commit: f6ae8c3
   date: 2026-07-19
 links:
   - decision-p533-baseline
-  - question-p533-worse-than-climatology
+  - decision-m1-ladder-exception
 ---
 ML-based HF propagation nowcasting: train on real path-report data
 (WSPRnet, RBN, PSKReporter) to predict band openings at (tx Maidenhead field,
@@ -25,9 +25,8 @@ reception reports. M0 (PR #11) and M1 (PR #13) are both complete: the
 WSPRnet→lake→labels→climatology→eval pipeline runs end-to-end from empty
 `data/`, and `scripts/eval_m1.py` adds a vendored ITU-R P.533 baseline to the
 same headline comparison. P.533 currently loses badly to climatology on Brier
-— see [[decision-p533-baseline]] and [[question-p533-worse-than-climatology]]
-before assuming M1 is unconditionally cleared to move past. Next step is M2
-(LightGBM) in ROADMAP.md.
+— see [[decision-p533-baseline]] and [[decision-m1-ladder-exception]] for
+why M2 proceeded anyway. Next step is M2 (LightGBM) in ROADMAP.md.
 
 ## Where things live
 
