@@ -9,7 +9,14 @@ OUT=bin
 mkdir -p "$OUT"
 
 CC="${CC:-cc}"
-CFLAGS="-O2 -fPIC -w"
+# -fcommon: several ITURHFProp/Src/ITURHFProp/*.c files declare the same
+# dll*/hLib function-pointer globals (for runtime dlsym resolution of the
+# noise library) without `extern`, so each translation unit tentatively
+# defines them. GCC 10+ defaults to -fno-common on Linux and fails those
+# as "multiple definition" link errors; clang (macOS's default cc) doesn't
+# hit this the same way, so it only surfaces on Linux. -fcommon restores
+# the traditional tentative-definition merging this legacy C relies on.
+CFLAGS="-O2 -fPIC -fcommon -w"
 
 # Reality check against the vendored tree's own makefiles (P372/Linux/Makefile,
 # P533/Linux/Makefile, ITURHFProp/Linux/Makefile), confirmed by test-building
