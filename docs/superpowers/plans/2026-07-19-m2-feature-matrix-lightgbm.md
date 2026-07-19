@@ -470,7 +470,7 @@ def add_solar_features(labels: pl.DataFrame) -> pl.DataFrame:
                 "path_daylight_fraction", "midpoint_hours_since_terminator"],
         orient="row",
     )
-    return pl.concat([labels, solar], how="horizontal")
+    return pl.concat([labels, solar], how="horizontal_extend")
 ```
 
 - [ ] **Step 4: Run tests to verify they pass**
@@ -871,7 +871,7 @@ def add_spaceweather_features(labels: pl.DataFrame, omni: pl.DataFrame) -> pl.Da
          other_now.rename({"f107": "f107_daily", "bz_gsm": "bz_gsm_now",
                             "solar_wind_speed": "solar_wind_speed_now", "dst": "dst_now"}),
          f107_smoothed],
-        how="horizontal",
+        how="horizontal_extend",
     )
     return out
 ```

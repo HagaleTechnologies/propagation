@@ -96,4 +96,4 @@ def add_solar_features(labels: pl.DataFrame) -> pl.DataFrame:
                 "path_daylight_fraction", "midpoint_hours_since_terminator"],
         orient="row",
     )
-    return pl.concat([labels, solar], how="horizontal")
+    return pl.concat([labels, solar], how="horizontal_extend")
