@@ -61,35 +61,38 @@ def _hours_since_terminator(lat: float, lon: float, when) -> float:
 
 
 def add_solar_features(labels: pl.DataFrame) -> pl.DataFrame:
-    """Requires tx_geomag_lat-style geometry columns to already be present
-    (run after features.geometry.add_geometry_features): tx/rx/midpoint/
-    control-point lat+lon and window_start. Computed per row (solar position
-    depends on the actual prediction time, not just the static path)."""
+    """Requires geometry columns to already be present (run after
+    features.geometry.add_geometry_features): midpoint/control-point lat+lon
+    and window_start. Computed per row (solar position depends on the
+    actual prediction time, not just the static path).
+
+    Zenith is computed at the control points (nearest each terminus) and
+    the midpoint -- the physically relevant sampling locations for D-layer
+    absorption along the path, matching P.533's own convention. There is no
+    separate "terminus zenith": this module only has control-point/midpoint
+    lat-lon available from Task 1's output, and a terminus zenith would
+    just duplicate the control-point zenith at the distances this repo's
+    grid resolution operates at, wasting model capacity on a collinear
+    column -- see wiki/pages/gotcha-plan-drift-before-merge.md's sibling
+    lesson: catch a spec redundancy before it reaches the feature matrix,
+    not after.
+    """
     rows = []
     for r in labels.select(
         "window_start", "midpoint_lat", "midpoint_lon",
         "tx_control_lat", "tx_control_lon", "rx_control_lat", "rx_control_lon",
     ).iter_rows(named=True):
-        # tx/rx zenith use the terminus's own field-center lat/lon; the
-        # frame passed in carries midpoint/control points but not the raw
-        # tx/rx lat/lon, so callers building the full matrix (Task 7) pass
-        # tx_lat/tx_lon/rx_lat/rx_lon through geometry first if tx/rx zenith
-        # (as opposed to control-point zenith) is wanted per-row -- for this
-        # module, tx/rx zenith are computed at the control points nearest
-        # each terminus, which is the physically relevant point for D-layer
-        # absorption at that end of the path anyway.
         w = r["window_start"]
         tx_z = solar_zenith_deg(r["tx_control_lat"], r["tx_control_lon"], w)
         rx_z = solar_zenith_deg(r["rx_control_lat"], r["rx_control_lon"], w)
         mid_z = solar_zenith_deg(r["midpoint_lat"], r["midpoint_lon"], w)
-        # path_daylight_fraction: crude proxy = fraction of {tx, rx, mid} in daylight
+        # path_daylight_fraction: crude proxy = fraction of {tx_control, rx_control, mid} in daylight
         frac = sum(z < 90.0 for z in (tx_z, rx_z, mid_z)) / 3.0
         hrs = _hours_since_terminator(r["midpoint_lat"], r["midpoint_lon"], w)
-        rows.append((tx_z, rx_z, mid_z, tx_z, rx_z, frac, hrs))
+        rows.append((mid_z, tx_z, rx_z, frac, hrs))
     solar = pl.DataFrame(
         rows,
-        schema=["tx_solar_zenith", "rx_solar_zenith", "midpoint_solar_zenith",
-                "tx_control_solar_zenith", "rx_control_solar_zenith",
+        schema=["midpoint_solar_zenith", "tx_control_solar_zenith", "rx_control_solar_zenith",
                 "path_daylight_fraction", "midpoint_hours_since_terminator"],
         orient="row",
     )

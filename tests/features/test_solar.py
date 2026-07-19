@@ -30,8 +30,8 @@ def test_add_solar_features_requires_geometry_columns():
     }, schema_overrides={"window_start": pl.Datetime("us", "UTC")})
     with_geo = add_geometry_features(labels)
     out = add_solar_features(with_geo)
-    for col in ("tx_solar_zenith", "rx_solar_zenith", "midpoint_solar_zenith",
-                "tx_control_solar_zenith", "rx_control_solar_zenith",
+    for col in ("midpoint_solar_zenith", "tx_control_solar_zenith", "rx_control_solar_zenith",
                 "path_daylight_fraction", "midpoint_hours_since_terminator"):
         assert col in out.columns, col
+    assert "tx_solar_zenith" not in out.columns  # would just duplicate tx_control_solar_zenith
     assert 0.0 <= out["path_daylight_fraction"][0] <= 1.0
