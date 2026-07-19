@@ -144,8 +144,25 @@ def p533_score(
     tx_lat: float, tx_lon: float, rx_lat: float, rx_lon: float,
     band: str, month: int, hour: int, ssn: float,
 ) -> P533Result:
-    """Run ITURHFProp for one path/hour/month/SSN. `hour` is 0-23 UTC."""
+    """Run ITURHFProp for one path/hour/month/SSN. `hour` is 0-23 UTC.
+
+    ITU-R P.533 is an HF model: the vendored engine's own ValidatePath.c
+    enforces `1.0 <= Path.frequency <= 30.0` (MHz) and returns a clean error
+    for anything outside that range -- except it doesn't actually reach that
+    check cleanly for every input; on this vendored build, an out-of-range
+    frequency (e.g. 6m's 50.313 MHz, which BAND_FREQ_MHZ carries because
+    other bands need it, not because P.533 supports 6m) crashes the binary
+    with SIGSEGV instead of a reported error. Validate client-side so a band
+    outside P.533's physical domain fails as an abstain (ValueError, caught
+    by P533Model), not a crash.
+    """
     freq = BAND_FREQ_MHZ[band]
+    if not 1.0 <= freq <= 30.0:
+        raise ValueError(
+            f"band {band!r} ({freq} MHz) is outside ITU-R P.533's valid "
+            "frequency range (1.0-30.0 MHz, HF only); the vendored binary "
+            "segfaults rather than erroring cleanly on out-of-range input"
+        )
     card = render_input_card(
         tx_lat=tx_lat, tx_lon=tx_lon, rx_lat=rx_lat, rx_lon=rx_lon,
         month=month, hour_utc=hour, ssn=ssn, freq_mhz=freq, data_dir=_data_dir(),

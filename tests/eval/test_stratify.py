@@ -46,7 +46,7 @@ def test_fetch_definitive_kp_caches(tmp_path, monkeypatch):
     calls = []
 
     def fake_get(url, **kwargs):
-        calls.append(url)
+        calls.append((url, kwargs))
         class R:
             status_code = 200
             text = FIXTURE.read_text()
@@ -59,6 +59,25 @@ def test_fetch_definitive_kp_caches(tmp_path, monkeypatch):
     df = stratify.fetch_definitive_kp(cache_dir=tmp_path)
     assert len(calls) == 1
     assert len(df) == 4
+
+
+def test_fetch_definitive_kp_follows_redirects(tmp_path, monkeypatch):
+    # kp.gfz-potsdam.de 301-redirects to kp.gfz.de; without follow_redirects
+    # httpx returns the HTML redirect notice instead of the real archive.
+    calls = []
+
+    def fake_get(url, **kwargs):
+        calls.append(kwargs)
+        class R:
+            status_code = 200
+            text = FIXTURE.read_text()
+            def raise_for_status(self):
+                pass
+        return R()
+
+    monkeypatch.setattr(stratify.httpx, "get", fake_get)
+    stratify.fetch_definitive_kp(cache_dir=tmp_path)
+    assert calls[0].get("follow_redirects") is True
 
 
 def test_tag_storm_windows_joins_3h_blocks():

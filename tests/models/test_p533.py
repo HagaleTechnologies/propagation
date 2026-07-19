@@ -97,6 +97,18 @@ def test_p533_score_raises_on_nonzero_exit(monkeypatch):
         p533.p533_score(0, 0, 10, 10, "20m", 1, 0, 10.0)
 
 
+def test_p533_score_rejects_frequency_outside_hf_range(monkeypatch):
+    # 6m (50.313 MHz) is outside P.533's valid 1.0-30.0 MHz range; the
+    # vendored binary segfaults on it rather than erroring cleanly, so
+    # p533_score must reject it before ever invoking the subprocess.
+    def fake_run(cmd, **kwargs):
+        raise AssertionError("subprocess.run must not be called for an out-of-range frequency")
+
+    monkeypatch.setattr(p533.subprocess, "run", fake_run)
+    with pytest.raises(ValueError, match="valid frequency range"):
+        p533.p533_score(0, 0, 10, 10, "6m", 1, 0, 10.0)
+
+
 @pytest.mark.skipif(not binary_path().exists(), reason="run `uv run build-p533` first")
 def test_p533_score_against_real_binary():
     # A path that must be reliably open: 1000 km mid-latitude 20m, midday, high SSN.
