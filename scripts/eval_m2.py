@@ -20,6 +20,7 @@ import polars as pl
 from propagation.data.spaceweather import fetch_omni2_range
 from propagation.data.wsprnet import download_wsprnet_archive, extract_wsprnet
 from propagation.eval.report import write_headline_report
+from propagation.eval.splits import blocked_cv_gap_hours
 from propagation.eval.stratify import fetch_definitive_kp, tag_storm_windows
 from propagation.features.matrix import build_feature_matrix
 from propagation.features.universe import build_universe
@@ -39,6 +40,31 @@ def _build_labels_for_month(archive: Path, band: str) -> pl.DataFrame:
 
 def _build_labels_for_months(archives: dict[str, Path], band: str) -> pl.DataFrame:
     return pl.concat([_build_labels_for_month(a, band) for a in archives.values()])
+
+
+def enforce_blocked_cv_gap(
+    train_labels: pl.DataFrame,
+    eval_labels: pl.DataFrame,
+    max_horizon_hours: float = 3.0,
+    max_ar_lookback_hours: float = 24.0,
+) -> None:
+    """docs/SPEC-labeling.md sec 6 rule 1: train and eval windows must be
+    separated by >= blocked_cv_gap_hours(...) or the split leaks AR/horizon
+    information across the boundary. Raises ValueError if violated (this
+    also catches out-of-order/overlapping train/eval months, since the
+    resulting gap is <= 0 < required)."""
+    train_end = train_labels["window_start"].max()
+    eval_start = eval_labels["window_start"].min()
+    required_gap_hours = blocked_cv_gap_hours(max_horizon_hours, max_ar_lookback_hours)
+    actual_gap_hours = (eval_start - train_end).total_seconds() / 3600.0
+    if actual_gap_hours < required_gap_hours:
+        raise ValueError(
+            f"blocked-CV gap violation: eval window starts only {actual_gap_hours:.2f}h "
+            f"after train window ends, but docs/SPEC-labeling.md sec 6 rule 1 requires "
+            f">= {required_gap_hours:.2f}h (blocked_cv_gap_hours(max_horizon_hours="
+            f"{max_horizon_hours}, max_ar_lookback_hours={max_ar_lookback_hours})) to "
+            f"avoid train/eval leakage. Choose train/eval months with a sufficient gap."
+        )
 
 
 def write_three_model_slice_reports(
@@ -102,6 +128,7 @@ def main() -> None:
 
     train_labels = _build_labels_for_months(train_archives, args.band)
     eval_labels = _build_labels_for_months(eval_archives, args.band)
+    enforce_blocked_cv_gap(train_labels, eval_labels)
 
     cache_dir = args.data_dir / "cache"
     all_years = sorted({int(ym.split("-")[0]) for ym in list(args.train_months) + list(args.eval_months)})
