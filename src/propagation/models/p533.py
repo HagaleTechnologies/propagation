@@ -11,6 +11,7 @@ import os
 import re
 import subprocess
 import tempfile
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -229,34 +230,64 @@ class P533Model:
     results are memoized on that key; SSN is rounded to an integer for the
     memo key (finer variation is far below P.533's fidelity). Matches
     ClimatologyModel's predict(cells) -> cells+p_open shape by convention,
-    not by a shared protocol class."""
+    not by a shared protocol class.
 
-    def __init__(self, ssn_by_month: dict[str, float]):
+    `predict` fans unique (path, band, month, hour, SSN) keys out across a
+    thread pool -- each one is a ~50ms subprocess call to the vendored
+    binary, and real WSPRnet-scale eval sets carry hundreds of thousands of
+    unique keys per month, so a serial loop is a many-hour bottleneck.
+    subprocess.run releases the GIL while the child runs, so threads (not
+    processes) already parallelize the wall-clock-dominant part."""
+
+    def __init__(self, ssn_by_month: dict[str, float], max_workers: int | None = None):
         self._ssn = ssn_by_month          # "YYYY-MM" -> SSN
         self._memo: dict[tuple, float | None] = {}
+        self._max_workers = max_workers or os.cpu_count() or 8
 
-    def _score_one(self, tx_field: str, rx_field: str, band: str,
-                   month_key: str, month: int, hour: int) -> float | None:
+    def _resolve_key(self, tx_field: str, rx_field: str, band: str,
+                      month_key: str, month: int, hour: int
+                      ) -> tuple[tuple, float] | None:
         ssn = self._ssn.get(month_key)
         if ssn is None:
             return None                   # abstain: no SSN for that month
-        key = (tx_field, rx_field, band, month, hour, round(ssn))
-        if key not in self._memo:
-            tx_lat, tx_lon = grid_to_latlon(tx_field)
-            rx_lat, rx_lon = grid_to_latlon(rx_field)
-            try:
-                res = p533_score(tx_lat, tx_lon, rx_lat, rx_lon,
-                                 band, month, hour, ssn)
-                self._memo[key] = res.reliability_pct / 100.0
-            except (RuntimeError, ValueError):
-                self._memo[key] = None    # abstain on engine failure
-        return self._memo[key]
+        return (tx_field, rx_field, band, month, hour, round(ssn)), ssn
+
+    @staticmethod
+    def _compute(key: tuple, tx_field: str, rx_field: str, band: str,
+                 month: int, hour: int, ssn: float) -> tuple[tuple, float | None]:
+        tx_lat, tx_lon = grid_to_latlon(tx_field)
+        rx_lat, rx_lon = grid_to_latlon(rx_field)
+        try:
+            res = p533_score(tx_lat, tx_lon, rx_lat, rx_lon, band, month, hour, ssn)
+            return key, res.reliability_pct / 100.0
+        except (RuntimeError, ValueError):
+            return key, None              # abstain on engine failure
 
     def predict(self, labels: pl.DataFrame) -> pl.DataFrame:
-        p = []
+        row_keys: list[tuple | None] = []
+        pending: dict[tuple, tuple] = {}
         for ws, tx, rx, band in labels.select(
             "window_start", "tx_field", "rx_field", "band"
         ).iter_rows():
             month_key = f"{ws.year:04d}-{ws.month:02d}"
-            p.append(self._score_one(tx, rx, band, month_key, ws.month, ws.hour))
+            resolved = self._resolve_key(tx, rx, band, month_key, ws.month, ws.hour)
+            if resolved is None:
+                row_keys.append(None)
+                continue
+            key, ssn = resolved
+            row_keys.append(key)
+            if key not in self._memo and key not in pending:
+                pending[key] = (tx, rx, band, ws.month, ws.hour, ssn)
+
+        if pending:
+            with ThreadPoolExecutor(max_workers=self._max_workers) as pool:
+                futures = [
+                    pool.submit(self._compute, key, *args)
+                    for key, args in pending.items()
+                ]
+                for fut in as_completed(futures):
+                    key, value = fut.result()
+                    self._memo[key] = value
+
+        p = [self._memo[key] if key is not None else None for key in row_keys]
         return labels.with_columns(pl.Series("p_open", p, dtype=pl.Float64))
