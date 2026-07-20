@@ -1,5 +1,7 @@
 import json
 import subprocess
+import threading
+import time
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -226,3 +228,28 @@ def test_predict_abstains_on_failed_score(monkeypatch):
     ])
     out = model.predict(cells)
     assert out["p_open"].to_list() == [None]
+
+
+def test_predict_fans_unique_keys_across_thread_pool(monkeypatch):
+    # Real eval sets carry hundreds of thousands of unique (path, hour) keys;
+    # predict() must compute each exactly once via the thread pool (not once
+    # per row) and return results in the original row order regardless of
+    # which thread finishes first.
+    calls = []
+    call_lock = threading.Lock()
+
+    def fake_score(tx_lat, tx_lon, rx_lat, rx_lon, band, month, hour, ssn):
+        with call_lock:
+            calls.append((band, month, hour))
+        # Vary "cost" so completion order differs from submission order.
+        time.sleep(0.01 if hour % 2 == 0 else 0.0)
+        return P533Result(reliability_pct=float(hour), snr_db=0.0)
+
+    monkeypatch.setattr(p533, "p533_score", fake_score)
+    model = P533Model(ssn_by_month={"2026-06": 120.0}, max_workers=4)
+    ts = datetime(2026, 6, 15, 0, 0, tzinfo=timezone.utc)
+    rows = [(ts.replace(hour=h), "EM", "PM", "20m") for h in range(20)] * 5
+    cells = _cells(rows)
+    out = model.predict(cells)
+    assert len(calls) == 20  # 100 rows, 20 unique hours -> 20 calls, not 100
+    assert out["p_open"].to_list() == [float(row[0].hour) / 100.0 for row in rows]
