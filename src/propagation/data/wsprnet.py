@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import datetime as dt
 import gzip
+import tempfile
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -92,44 +93,53 @@ def extract_wsprnet(archive_path: Path, band: str, chunk_size: int = 200_000) ->
     # qualifying row for the whole file before ever building a DataFrame
     # (the original approach) grows a many-GB list of Python objects -- the
     # actual cause of a 2026-07-20 OOM incident that hung the whole machine.
-    # Flushing to a small, columnar polars DataFrame every `chunk_size` rows
-    # bounds that to one chunk's worth of Python objects at a time; the
-    # chunks are concatenated (and deduped, same as before) only once
-    # everything is already in polars' compact columnar form.
-    rows: list[dict] = []
-    chunks: list[pl.DataFrame] = []
+    # Flushing each chunk_size batch straight to a parquet file (rather than
+    # keeping a growing list of in-memory DataFrame chunks) bounds resident
+    # memory to ~one chunk for the entire scan: keeping all chunks resident
+    # still re-accumulates the whole month's data in RAM over time, and
+    # CPython's allocator doesn't reliably return freed dict/string memory
+    # to the OS across hundreds of alloc/free cycles, so that approach's
+    # RSS kept climbing for the whole scan and still triggered a second,
+    # separate OOM near-miss even though no single chunk was ever large.
     rejection_counts: dict[str, int] = {}
     n_lines_read = 0
     n_parsed = 0
 
-    def _flush() -> None:
-        if rows:
-            chunks.append(pl.DataFrame(rows, schema_overrides={"ts": pl.Datetime("us", "UTC")}))
-            rows.clear()
+    with tempfile.TemporaryDirectory(prefix="wsprnet-extract-") as td_name:
+        td = Path(td_name)
+        rows: list[dict] = []
+        chunk_paths: list[Path] = []
 
-    with gzip.open(archive_path, "rt", encoding="ascii", errors="replace") as f:
-        for line in f:
-            if not line.strip():
-                continue
-            n_lines_read += 1
-            parsed = parse_wsprnet_row(line)
-            if parsed is None or parsed["band"] != band:
-                continue
-            n_parsed += 1
-            parsed["ts"] = dt.datetime.fromtimestamp(parsed["ts"], tz=dt.timezone.utc)
-            ok, reason = is_qualifying_spot(parsed)
-            if not ok:
-                rejection_counts[reason] = rejection_counts.get(reason, 0) + 1
-                continue
-            rows.append(parsed)
-            if len(rows) >= chunk_size:
-                _flush()
-    _flush()
+        def _flush() -> None:
+            if rows:
+                chunk_path = td / f"chunk-{len(chunk_paths):06d}.parquet"
+                pl.DataFrame(rows, schema_overrides={"ts": pl.Datetime("us", "UTC")}).write_parquet(chunk_path)
+                chunk_paths.append(chunk_path)
+                rows.clear()
 
-    if not chunks:
-        spots = pl.DataFrame(schema=SPOT_SCHEMA)
-    else:
-        spots = pl.concat(chunks, how="vertical_relaxed")
+        with gzip.open(archive_path, "rt", encoding="ascii", errors="replace") as f:
+            for line in f:
+                if not line.strip():
+                    continue
+                n_lines_read += 1
+                parsed = parse_wsprnet_row(line)
+                if parsed is None or parsed["band"] != band:
+                    continue
+                n_parsed += 1
+                parsed["ts"] = dt.datetime.fromtimestamp(parsed["ts"], tz=dt.timezone.utc)
+                ok, reason = is_qualifying_spot(parsed)
+                if not ok:
+                    rejection_counts[reason] = rejection_counts.get(reason, 0) + 1
+                    continue
+                rows.append(parsed)
+                if len(rows) >= chunk_size:
+                    _flush()
+        _flush()
+
+        if not chunk_paths:
+            spots = pl.DataFrame(schema=SPOT_SCHEMA)
+        else:
+            spots = pl.concat([pl.read_parquet(p) for p in chunk_paths], how="vertical_relaxed")
         for col in SPOT_SCHEMA:
             if col not in spots.columns:
                 spots = spots.with_columns(pl.lit(None).alias(col))
