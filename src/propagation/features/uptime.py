@@ -93,7 +93,18 @@ def build_receiver_uptime(spots: pl.DataFrame) -> pl.DataFrame:
     ts_minutes = (working["ts"].cast(pl.Int64) // 60_000_000).to_numpy()
     row_idx, window_start_min = _evidence_window_starts_minutes(ts_minutes)
 
-    exploded = working[row_idx.tolist()].with_columns(
+    # row_idx holds ~5x the input row count (each spot pads into multiple
+    # overlapping 15-min windows) -- exploding the FULL `working` frame
+    # (every spots column, most unused below) at that multiplier is what
+    # actually drove a 2026-07-20 OOM incident: measured ~22GB for one
+    # month's worth of real 2024 WSPRnet volume from this gather alone.
+    # Narrowing to only the columns this function and _modal_location
+    # actually read before exploding cuts what gets multiplied 5x.
+    # (Converting row_idx to a Python list of boxed ints before indexing,
+    # the original `.tolist()`, was a smaller contributor to the same
+    # incident; polars accepts a numpy int array directly.)
+    narrow = working.select("ts", "de_call", "band", "mode_class", "_grid_norm")
+    exploded = narrow[row_idx].with_columns(
         pl.Series("window_start_min", window_start_min)
     )
     exploded = exploded.with_columns(
