@@ -86,11 +86,26 @@ class ExtractResult:
     rejection_counts: dict[str, int] = field(default_factory=dict)
 
 
-def extract_wsprnet(archive_path: Path, band: str) -> ExtractResult:
+def extract_wsprnet(archive_path: Path, band: str, chunk_size: int = 200_000) -> ExtractResult:
+    # A full month's archive covers every band and holds tens of millions of
+    # lines at real (2024+) WSPRnet volume; accumulating one Python dict per
+    # qualifying row for the whole file before ever building a DataFrame
+    # (the original approach) grows a many-GB list of Python objects -- the
+    # actual cause of a 2026-07-20 OOM incident that hung the whole machine.
+    # Flushing to a small, columnar polars DataFrame every `chunk_size` rows
+    # bounds that to one chunk's worth of Python objects at a time; the
+    # chunks are concatenated (and deduped, same as before) only once
+    # everything is already in polars' compact columnar form.
     rows: list[dict] = []
+    chunks: list[pl.DataFrame] = []
     rejection_counts: dict[str, int] = {}
     n_lines_read = 0
     n_parsed = 0
+
+    def _flush() -> None:
+        if rows:
+            chunks.append(pl.DataFrame(rows, schema_overrides={"ts": pl.Datetime("us", "UTC")}))
+            rows.clear()
 
     with gzip.open(archive_path, "rt", encoding="ascii", errors="replace") as f:
         for line in f:
@@ -107,11 +122,14 @@ def extract_wsprnet(archive_path: Path, band: str) -> ExtractResult:
                 rejection_counts[reason] = rejection_counts.get(reason, 0) + 1
                 continue
             rows.append(parsed)
+            if len(rows) >= chunk_size:
+                _flush()
+    _flush()
 
-    if not rows:
+    if not chunks:
         spots = pl.DataFrame(schema=SPOT_SCHEMA)
     else:
-        spots = pl.DataFrame(rows, schema_overrides={"ts": pl.Datetime("us", "UTC")})
+        spots = pl.concat(chunks, how="vertical_relaxed")
         for col in SPOT_SCHEMA:
             if col not in spots.columns:
                 spots = spots.with_columns(pl.lit(None).alias(col))
