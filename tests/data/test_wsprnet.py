@@ -68,3 +68,16 @@ def test_extract_wsprnet_empty_result_has_correct_schema(tmp_path):
     result = extract_wsprnet(gz_path, band="20m")
     assert result.spots.height == 0
     assert result.n_lines_read == 0
+
+
+def test_extract_wsprnet_chunking_matches_single_chunk_result(gz_fixture):
+    # chunk_size=1 forces every qualifying row into its own flush -- the
+    # concatenated, deduped result must be identical to one giant chunk
+    # (the pre-fix behavior), proving the memory-bounding change doesn't
+    # alter what gets extracted.
+    chunked = extract_wsprnet(gz_fixture, band="20m", chunk_size=1)
+    unchunked = extract_wsprnet(gz_fixture, band="20m", chunk_size=1_000_000)
+    assert chunked.spots.equals(unchunked.spots)
+    assert chunked.n_lines_read == unchunked.n_lines_read
+    assert chunked.n_parsed == unchunked.n_parsed
+    assert chunked.rejection_counts == unchunked.rejection_counts
