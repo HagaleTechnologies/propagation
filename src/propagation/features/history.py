@@ -52,7 +52,17 @@ _BAND_ORDER = ["160m", "80m", "60m", "40m", "30m", "20m", "17m", "15m", "12m", "
 
 def field_neighbors(field: str) -> list[str]:
     """The up-to-8 Maidenhead-field neighbors of a 2-char field. Longitude
-    wraps at the +/-180 seam (A<->R); latitude does not wrap (poles)."""
+    wraps at the +/-180 seam (A<->R); latitude does not wrap (poles).
+
+    Symmetric: B in field_neighbors(A) iff A in field_neighbors(B). Each of
+    the 8 (dlon, dlat) offsets has an exact inverse (-dlon, -dlat) also in
+    that set, and validity only depends on the *destination* latitude being
+    in [0, 17] -- so if A's shift by (dlon, dlat) lands validly on B, B's
+    shift by (-dlon, -dlat) lands validly back on A. `add_history_features`
+    relies on this: adjacent_cell looks up each target's own neighbors
+    directly, equivalent to (and cheaper than) the original "which history
+    rows have this target as one of their neighbors" formulation.
+    """
     lon_i = ord(field[0]) - ord("A")
     lat_i = ord(field[1]) - ord("A")
     out = []
@@ -78,22 +88,21 @@ def _adjacent_bands(band: str) -> list[str]:
     return out
 
 
-def _rolling_n_and_snr(
-    history: pl.DataFrame, targets: pl.DataFrame, key_cols: list[str], prefix: str
+def _rolling_raw(
+    history: pl.DataFrame, anchor_source: pl.DataFrame, key_cols: list[str], prefix: str
 ) -> pl.DataFrame:
-    """For every distinct (key_cols, window_start) combination in `targets`,
-    computes trailing count + availability-buffer-adjusted weighted-mean SNR
-    for each lookback in _LOOKBACKS, using only `history` rows that are
-    already available (source.window_start <= target.window_start -
-    AVAIL_BUFFER_MIN). Returns one row per distinct target combination:
-    window_start, key_cols, and the {prefix}_n_{suffix} / {prefix}_snr_{suffix}
-    columns.
+    """Core of `_rolling_n_and_snr`, stopping short of the final SNR divide:
+    returns {prefix}_n_{suffix} (a count, safe to sum across relations) and
+    RAW, un-divided {prefix}_num_{suffix}/{prefix}_den_{suffix} (weighted-SNR
+    numerator/denominator). Splitting this out lets adjacent_band/
+    adjacent_cell compute several relations' contributions separately (see
+    module docstring below) and combine them correctly by summing numerator
+    and denominator before a single final division -- summing already-
+    divided per-relation averages would be wrong.
 
-    Implementation: the target combinations are concatenated into the
-    (sorted) history as zero-weight anchor rows so that polars'
-    rolling_sum_by (which only evaluates at rows present in the frame) can
-    be evaluated exactly at each target's own timestamp; the anchors are
-    filtered back out at the end.
+    `anchor_source` need not be pre-deduplicated: only its distinct
+    (window_start, key_cols) combinations matter, exactly as `targets` did
+    in the original single-relation `_rolling_n_and_snr`.
     """
     h = (
         history.with_columns(
@@ -107,7 +116,7 @@ def _rolling_n_and_snr(
         .with_columns(pl.lit(False).alias("_is_anchor"))
     )
 
-    anchors = targets.select(["window_start", *key_cols]).unique().with_columns(
+    anchors = anchor_source.select(["window_start", *key_cols]).unique().with_columns(
         pl.lit(0, dtype=pl.Int64).alias("n_spots"),
         pl.lit(0, dtype=pl.Int64).alias("_snr_weight"),
         pl.lit(0.0).alias("_snr_weighted"),
@@ -128,21 +137,97 @@ def _rolling_n_and_snr(
         d_buf = pl.col("_snr_weight").rolling_sum_by("window_start", window_size=buffer_str, closed="none").over(key_cols)
 
         n_name = f"{prefix}_n_{suffix}"
-        snr_name = f"{prefix}_snr_{suffix}"
+        num_name = f"{prefix}_num_{suffix}"
+        den_name = f"{prefix}_den_{suffix}"
         # Clamped at 0: for lookbacks shorter than AVAIL_BUFFER_MIN (the
         # "15m" suffix), full - buffer can go negative even though the
         # structurally-correct answer is always 0 (see module docstring).
         n_expr = (n_full - n_buf).clip(lower_bound=0).alias(n_name)
-        denom = d_full - d_buf
-        snr_expr = pl.when(denom > 0).then((w_full - w_buf) / denom).otherwise(None).alias(snr_name)
-        exprs += [n_expr, snr_expr]
-        out_names += [n_name, snr_name]
+        num_expr = (w_full - w_buf).alias(num_name)
+        den_expr = (d_full - d_buf).alias(den_name)
+        exprs += [n_expr, num_expr, den_expr]
+        out_names += [n_name, num_name, den_name]
 
     return (
         combined.with_columns(exprs)
         .filter(pl.col("_is_anchor"))
         .select(["window_start", *key_cols, *out_names])
     )
+
+
+def _finalize_snr(raw: pl.DataFrame, prefix: str) -> pl.DataFrame:
+    """Divides `_rolling_raw`'s raw numerator/denominator into the final
+    {prefix}_snr_{suffix} columns and drops the raw ones, matching the shape
+    `_rolling_n_and_snr` returns."""
+    exprs = []
+    keep = [c for c in raw.columns if not (c.startswith(f"{prefix}_num_") or c.startswith(f"{prefix}_den_"))]
+    for suffix in _LOOKBACKS:
+        num = pl.col(f"{prefix}_num_{suffix}")
+        den = pl.col(f"{prefix}_den_{suffix}")
+        exprs.append(pl.when(den > 0).then(num / den).otherwise(None).alias(f"{prefix}_snr_{suffix}"))
+    return raw.with_columns(exprs).select([*keep, *(f"{prefix}_snr_{suffix}" for suffix in _LOOKBACKS)])
+
+
+def _rolling_n_and_snr(
+    history: pl.DataFrame, targets: pl.DataFrame, key_cols: list[str], prefix: str
+) -> pl.DataFrame:
+    """For every distinct (key_cols, window_start) combination in `targets`,
+    computes trailing count + availability-buffer-adjusted weighted-mean SNR
+    for each lookback in _LOOKBACKS, using only `history` rows that are
+    already available (source.window_start <= target.window_start -
+    AVAIL_BUFFER_MIN). Returns one row per distinct target combination:
+    window_start, key_cols, and the {prefix}_n_{suffix} / {prefix}_snr_{suffix}
+    columns.
+
+    Implementation: the target combinations are concatenated into the
+    (sorted) history as zero-weight anchor rows so that polars'
+    rolling_sum_by (which only evaluates at rows present in the frame) can
+    be evaluated exactly at each target's own timestamp; the anchors are
+    filtered back out at the end.
+    """
+    return _finalize_snr(_rolling_raw(history, targets, key_cols, prefix), prefix)
+
+
+def _relation_via_expanded_anchors(
+    history: pl.DataFrame,
+    expanded_anchor_source: pl.DataFrame,
+    varying_col: str,
+    orig_col: str,
+    key_cols: list[str],
+    prefix: str,
+) -> pl.DataFrame:
+    """Shared machinery for adjacent_band/adjacent_cell: each target row maps
+    to several (2 or up to 8) *other* keys to aggregate over and sum -- e.g.
+    adjacent_cell sums same-cell-style stats across a target rx_field's up
+    to 8 Maidenhead neighbors. The original implementation exploded
+    `history` itself (2x/8x) to cover every relation copy in one combined
+    rolling pass; at real 2024+ WSPRnet volume that multiplies real spot
+    payload data by up to 8x and was the direct cause of a 2026-07-20 OOM
+    incident (~28GB+ for one month's adjacent_cell alone).
+
+    This instead explodes only `expanded_anchor_source` -- a narrow,
+    payload-free frame (window_start, key_cols, plus `orig_col` holding each
+    row's *original* target value for whichever of `key_cols` varies across
+    relation copies -- `band` for adjacent_band, `rx_field` for
+    adjacent_cell) -- and relies on `_rolling_raw`'s own `.unique()` anchor
+    construction to collapse it back down to the true distinct (window_start,
+    key_cols) cardinality (bounded by real path/hour combinations, orders of
+    magnitude below a raw 2x/8x row count) *before* it ever touches
+    `history`, which stays at its original, unexploded size.
+
+    `varying_col` (e.g. "band") holds each relation copy's *other* key value
+    in `expanded_anchor_source` (matching `history`'s column of that name);
+    `orig_col` (e.g. "_orig_band") holds the target row's own value, used to
+    attribute each relation copy back and sum raw n_/num_/den_ across them
+    (NOT the finalized ratio -- summing already-divided per-relation SNR
+    averages would be wrong) before a single final division.
+    """
+    raw = _rolling_raw(history, expanded_anchor_source.select("window_start", *key_cols), key_cols, prefix)
+    attributed = expanded_anchor_source.join(raw, on=["window_start", *key_cols], how="left")
+    group_key_cols = [c for c in key_cols if c != varying_col]
+    sum_exprs = [pl.col(c).sum().alias(c) for c in raw.columns if c not in ("window_start", *key_cols)]
+    combined = attributed.group_by(["window_start", orig_col, *group_key_cols]).agg(sum_exprs)
+    return _finalize_snr(combined.rename({orig_col: varying_col}), prefix)
 
 
 def add_history_features(full_history: pl.DataFrame, target_rows: pl.DataFrame) -> pl.DataFrame:
@@ -152,48 +237,78 @@ def add_history_features(full_history: pl.DataFrame, target_rows: pl.DataFrame) 
                     "band": pl.Utf8, "n_spots": pl.Int64, "snr_ft8eq_p50": pl.Float64, "open": pl.Int64},
         )
 
-    same_cell = _rolling_n_and_snr(full_history, target_rows, ["tx_field", "rx_field", "band"], "same_cell")
+    # _rolling_n_and_snr only ever reads window_start/key_cols/n_spots/
+    # snr_ft8eq_p50 from `history` (it narrows to exactly that internally);
+    # adjacent_band and adjacent_cell join-expand `full_history` up to 2x
+    # and 8x respectively before that internal narrowing ever runs, so the
+    # unused columns (open, n_monitors, n_tx_stations, evidence_tier) were
+    # getting multiplied right along with everything else. Narrowing here,
+    # before any of the relation-specific joins, was part of fixing a
+    # 2026-07-20 OOM incident (measured ~28GB+ for one month's adjacent_band
+    # + adjacent_cell on real 2024 WSPRnet volume with the wide frame).
+    history_narrow = full_history.select(
+        "window_start", "tx_field", "rx_field", "band", "n_spots", "snr_ft8eq_p50"
+    )
+
+    same_cell = _rolling_n_and_snr(history_narrow, target_rows, ["tx_field", "rx_field", "band"], "same_cell")
     out = target_rows.join(same_cell, on=["window_start", "tx_field", "rx_field", "band"], how="left")
     for suffix in _LOOKBACKS:
         out = out.with_columns(pl.col(f"same_cell_n_{suffix}").fill_null(0))
 
-    reverse_hist = full_history.rename({"tx_field": "rx_field", "rx_field": "tx_field"})
+    reverse_hist = history_narrow.rename({"tx_field": "rx_field", "rx_field": "tx_field"})
     reverse = _rolling_n_and_snr(reverse_hist, target_rows, ["tx_field", "rx_field", "band"], "reverse_path")
     out = out.join(reverse, on=["window_start", "tx_field", "rx_field", "band"], how="left")
     for suffix in _LOOKBACKS:
         out = out.with_columns(pl.col(f"reverse_path_n_{suffix}").fill_null(0))
 
-    # adjacent band: expand each history row into one copy per TARGET band
-    # it's adjacent to (a row on 17m becomes adjacent-band history for both
-    # 20m and 15m cells), then aggregate keyed by that target band.
-    adj_band_hist = full_history.rename({"band": "_src_band"})
+    # adjacent band: for a target on band B, sum same-cell-style stats over
+    # B's up to 2 adjacent bands (a target on 20m looks at history on 17m
+    # and 15m). Expand the (small, payload-free) target keys per adjacent
+    # band -- not `history_narrow` (see _relation_via_expanded_anchors) --
+    # keeping each expanded row's own original band in `_orig_band`.
     band_map = pl.DataFrame(
         [(band, adj) for band in _BAND_ORDER for adj in _adjacent_bands(band)],
-        schema=["band", "_src_band"], orient="row",
+        schema=["_orig_band", "band"], orient="row",
     )
-    expanded = adj_band_hist.join(band_map, on="_src_band").drop("_src_band")
-    adj_band = _rolling_n_and_snr(expanded, target_rows, ["tx_field", "rx_field", "band"], "adjacent_band")
+    adj_band_anchor_source = (
+        target_rows.select("window_start", "tx_field", "rx_field", pl.col("band").alias("_orig_band"))
+        .join(band_map, on="_orig_band")
+    )
+    adj_band = _relation_via_expanded_anchors(
+        history_narrow, adj_band_anchor_source, "band", "_orig_band",
+        ["tx_field", "rx_field", "band"], "adjacent_band",
+    )
     out = out.join(adj_band, on=["window_start", "tx_field", "rx_field", "band"], how="left")
     for suffix in _LOOKBACKS:
         out = out.with_columns(pl.col(f"adjacent_band_n_{suffix}").fill_null(0))
 
     # adjacent cell: rx_field's 8 Maidenhead neighbors, same tx_field + band.
-    all_rx = full_history.select("rx_field").unique()["rx_field"].to_list()
+    # Same anchor-side-expansion pattern: expand target keys per neighbor of
+    # the target's OWN rx_field (field_neighbors is a symmetric relation, so
+    # this is equivalent to the original "expand history per neighbor of its
+    # rx_field" -- see field_neighbors' module docstring), not `history_narrow`.
+    target_rx_values = target_rows.select("rx_field").unique()["rx_field"].to_list()
     neighbor_map_rows = []
-    for rx in all_rx:
+    for rx in target_rx_values:
         for nb in field_neighbors(rx):
             neighbor_map_rows.append((rx, nb))
     neighbor_map = pl.DataFrame(
-        neighbor_map_rows, schema={"_src_rx": pl.Utf8, "rx_field": pl.Utf8}, orient="row"
+        neighbor_map_rows, schema={"_orig_rx": pl.Utf8, "rx_field": pl.Utf8}, orient="row"
     )
-    expanded_cell = full_history.rename({"rx_field": "_src_rx"}).join(neighbor_map, on="_src_rx").drop("_src_rx")
-    adj_cell = _rolling_n_and_snr(expanded_cell, target_rows, ["tx_field", "rx_field", "band"], "adjacent_cell")
+    adj_cell_anchor_source = (
+        target_rows.select("window_start", "tx_field", pl.col("rx_field").alias("_orig_rx"), "band")
+        .join(neighbor_map, on="_orig_rx")
+    )
+    adj_cell = _relation_via_expanded_anchors(
+        history_narrow, adj_cell_anchor_source, "rx_field", "_orig_rx",
+        ["tx_field", "rx_field", "band"], "adjacent_cell",
+    )
     out = out.join(adj_cell, on=["window_start", "tx_field", "rx_field", "band"], how="left")
     for suffix in _LOOKBACKS:
         out = out.with_columns(pl.col(f"adjacent_cell_n_{suffix}").fill_null(0))
 
     # band-wide: all cells, same band -- group by band + window_start only.
-    band_wide_src = full_history.group_by(["band", "window_start"]).agg(
+    band_wide_src = history_narrow.group_by(["band", "window_start"]).agg(
         pl.col("n_spots").sum(), pl.col("snr_ft8eq_p50").mean().alias("snr_ft8eq_p50"),
     )
     band_wide = _rolling_n_and_snr(band_wide_src, target_rows, ["band"], "band_wide")

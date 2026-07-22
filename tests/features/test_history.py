@@ -1,6 +1,7 @@
 from datetime import datetime, timezone
 
 import polars as pl
+import pytest
 
 from propagation.features.history import add_history_features, field_neighbors
 
@@ -78,6 +79,38 @@ def test_adjacent_cell_looks_at_maidenhead_neighbors_same_tx_and_band():
     target = _frame([_row(2, 0, "FN", "DM", "20m", 0, None)])
     out = add_history_features(history, target)
     assert out["adjacent_cell_n_3h"][0] == 6
+
+
+def test_adjacent_cell_combines_multiple_neighbors_by_weighted_snr_not_averaged_averages():
+    # Two distinct neighbors of DM (see field_neighbors("DM")) with
+    # DIFFERENT n_spots/snr each -- catches a wrong "mean of per-neighbor
+    # means" combination (would give (10+20)/2=15) instead of the correct
+    # n_spots-weighted mean across all contributing spots pooled together
+    # ((2*10 + 4*20) / (2+4) = 100/6).
+    assert "EM" in field_neighbors("DM")
+    assert "CM" in field_neighbors("DM")
+    history = _frame([
+        _row(1, 0, "FN", "EM", "20m", 2, 10.0),
+        _row(1, 0, "FN", "CM", "20m", 4, 20.0),
+    ])
+    target = _frame([_row(2, 0, "FN", "DM", "20m", 0, None)])
+    out = add_history_features(history, target)
+    assert out["adjacent_cell_n_3h"][0] == 6
+    assert out["adjacent_cell_snr_3h"][0] == pytest.approx(100 / 6)
+
+
+def test_adjacent_band_combines_multiple_bands_by_weighted_snr_not_averaged_averages():
+    # 20m's two adjacent bands (30m, 17m) each contribute history with
+    # different n_spots/snr -- same "pool, don't average averages" check
+    # as adjacent_cell, for the band relation.
+    history = _frame([
+        _row(1, 0, "FN", "DM", "17m", 3, 10.0),
+        _row(1, 0, "FN", "DM", "30m", 1, 30.0),
+    ])
+    target = _frame([_row(2, 0, "FN", "DM", "20m", 0, None)])
+    out = add_history_features(history, target)
+    assert out["adjacent_band_n_3h"][0] == 4
+    assert out["adjacent_band_snr_3h"][0] == pytest.approx((3 * 10 + 1 * 30) / 4)
 
 
 def test_band_wide_sums_across_all_cells_same_band():
