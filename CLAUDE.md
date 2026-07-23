@@ -12,12 +12,15 @@ M0 complete (PR #11): WSPRnet extraction, monitor-normalized labeling,
 climatology baseline, and eval harness run end-to-end via `scripts/run_m0.py`.
 M1 complete (PR #13, with live-run fixes in #14–#16): vendored ITU-R P.533
 baseline, `scripts/eval_m1.py` producing overall/storm/quiet headline
-reports. M2 code merged (PR #20): full feature matrix (path geometry, solar
-geometry, OMNI2 space weather, autoregressive spot history), leakage-audited,
-`GBTModel` (LightGBM + isotonic calibration), `scripts/eval_m2.py`. The live
-acceptance run (ROADMAP.md's actual pass/fail gate — GBT must beat both
-climatology and P.533 on Brier/log-loss at h=0 on 20m+10m across ≥3 held-out
-months) has not yet been run.
+reports. **M2 complete and accepted** (code merged PR #20; memory/perf
+fixes PR #22-26; label-leakage fix PR #27): full feature matrix, leakage-
+audited, `GBTModel` (LightGBM + isotonic calibration), `scripts/eval_m2.py`.
+The live acceptance run (ROADMAP.md's pass/fail gate) confirms GBT beats
+both climatology and P.533 on Brier/log-loss at h=0 on 20m+10m across 3
+held-out 2024 months incl. the Gannon storm — see
+`docs/DECISIONS/0005-m2-acceptance-result.md` for headline numbers. M3
+(scale to all bands/horizons, RBN + live PSKReporter, storm case studies)
+is next.
 
 ## Documents (read in this order)
 
