@@ -1,8 +1,14 @@
 """Assembles the full M2 feature matrix from every features/ module, plus
-time features (ARCHITECTURE.md sec 4 item 3) and mode-normalized SNR
-(reusing propagation.features.labels.snr_ft8eq -- already computed into
-labels.snr_ft8eq_p50 upstream by build_labels(), included here as-is, never
-reimplemented, per this plan's Global Constraints).
+time features (ARCHITECTURE.md sec 4 item 3).
+
+`labels.snr_ft8eq_p50` (propagation.features.labels.build_labels) is NOT a
+feature: it's the median mode-normalized SNR of the spots that constitute
+the current row's own `open` observation, so it's null iff open=0 and
+non-null iff open=1 -- a deterministic restatement of the label, not a
+leading indicator. A live acceptance run confirmed a LightGBM model trained
+on it hits ~0 Brier by learning exactly that null/not-null split. History
+features derived from OTHER rows' SNR (via add_history_features, below) are
+legitimate -- only the anchor row's own value is off-limits.
 """
 from __future__ import annotations
 
@@ -37,9 +43,7 @@ _HISTORY_COLS = [
     for stat in ("n", "snr")
     for lb in _HISTORY_LOOKBACKS
 ] + ["same_hour_yesterday_open"]
-_MODE_NORM_COLS = ["snr_ft8eq_p50"]
-
-FEATURE_COLUMNS = _TIME_COLS + _GEOMETRY_COLS + _SOLAR_COLS + _SPACEWEATHER_COLS + _HISTORY_COLS + _MODE_NORM_COLS
+FEATURE_COLUMNS = _TIME_COLS + _GEOMETRY_COLS + _SOLAR_COLS + _SPACEWEATHER_COLS + _HISTORY_COLS
 
 
 def add_time_features(labels: pl.DataFrame) -> pl.DataFrame:

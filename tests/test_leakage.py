@@ -1,12 +1,20 @@
 """Leakage audit for M2's feature matrix (docs/SPEC-labeling.md sec 6,
-ARCHITECTURE.md sec 6). Five properties, each a real failure mode a subtler
+ARCHITECTURE.md sec 6). Seven properties, each a real failure mode a subtler
 bug could reintroduce silently:
 1. A source spot inside the Δ_avail=20min buffer is excluded from history features.
 2. A source spot just outside the buffer IS included (the boundary is exact, not approximate).
 3. The blocked-CV gap for M2's real parameters (horizon=3h, AR lookback=24h) is 48h, the floor.
 4. Blocked folds actually honor that computed gap end-to-end.
 5. No definitive-Kp or any label column ends up in FEATURE_COLUMNS.
-Plus a sixth, specific to M2: space-weather features must be strictly
+6. `snr_ft8eq_p50` -- the anchor row's OWN mode-normalized SNR, computed by
+   build_labels() from the very spots that define its `open` value -- must
+   never appear in FEATURE_COLUMNS (a live acceptance run found a LightGBM
+   model trained on it hitting ~0 Brier by learning its null-iff-open=0
+   pattern instead of any real signal).
+7. No feature column's null-vs-not-null pattern is a perfect proxy for
+   `open`, guarding against the same failure mode recurring under a
+   different column name.
+Plus an eighth, specific to M2: space-weather features must be strictly
 trailing (as-of), never centered, independent of any CV gap consideration.
 """
 from datetime import datetime, timedelta, timezone
@@ -15,7 +23,7 @@ import polars as pl
 
 from propagation.eval.splits import blocked_cv_gap_hours, blocked_time_series_folds
 from propagation.features.history import add_history_features
-from propagation.features.matrix import FEATURE_COLUMNS
+from propagation.features.matrix import FEATURE_COLUMNS, build_feature_matrix
 
 
 def _row(hour, minute, n=1, snr=10.0):
@@ -77,6 +85,44 @@ def test_no_label_or_definitive_kp_columns_in_feature_columns():
     # Kp) -- confirm the feature columns don't accidentally name anything
     # that reads as the eval-only series.
     assert not any("definitive" in c for c in FEATURE_COLUMNS)
+
+
+def test_snr_ft8eq_p50_is_not_a_feature():
+    # It's the anchor row's own label-defining value (null iff open=0),
+    # not a leading indicator -- see module docstring property 6.
+    assert "snr_ft8eq_p50" not in FEATURE_COLUMNS
+
+
+def test_no_feature_column_perfectly_encodes_open_via_nulls():
+    # Rows spaced 48h apart, same cell, so no history relation ever finds a
+    # neighbor within any lookback window -- history counts stay uniformly
+    # 0 and history SNR averages stay uniformly null, so neither pattern
+    # coincidentally lines up with `open` in this small fixture. The only
+    # column that legitimately correlates 1:1 with `open` via nulls is
+    # snr_ft8eq_p50 itself, already excluded from FEATURE_COLUMNS above.
+    start = datetime(2026, 1, 1, tzinfo=timezone.utc)
+    labels = pl.DataFrame({
+        "window_start": [start + timedelta(hours=48 * i) for i in range(4)],
+        "tx_field": ["FN"] * 4, "rx_field": ["DM"] * 4, "band": ["20m"] * 4,
+        "open": [1, 0, 1, 0],
+        "n_spots": [3, 0, 2, 0],
+        "snr_ft8eq_p50": [10.0, None, 8.0, None],
+    }, schema_overrides={"window_start": pl.Datetime("us", "UTC")})
+
+    omni_times = [start + timedelta(hours=i) for i in range(24 * 10)]
+    omni = pl.DataFrame({
+        "time": omni_times, "kp": [3.0] * len(omni_times), "f107": [100.0] * len(omni_times),
+        "bz_gsm": [1.0] * len(omni_times), "solar_wind_speed": [400.0] * len(omni_times),
+        "dst": [-10.0] * len(omni_times),
+    }, schema_overrides={"time": pl.Datetime("us", "UTC")})
+
+    out = build_feature_matrix(labels, full_history=labels, omni=omni)
+    is_negative = out["open"] == 0
+    for col in FEATURE_COLUMNS:
+        is_null = out[col].is_null()
+        assert not (is_null == is_negative).all(), (
+            f"{col!r} perfectly encodes `open` via its null pattern -- likely leakage"
+        )
 
 
 def test_spaceweather_features_are_trailing_not_centered():
