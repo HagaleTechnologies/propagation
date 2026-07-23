@@ -58,10 +58,16 @@ is next.
 ## Knowledge wiki
 
 `wiki/INDEX.md` is the map of accumulated knowledge — read it before deep
-exploration; open pages relevant to your task. After substantive work, run
-/wiki-update: distill new gotchas/decisions/corrections into the wiki (or
-into docs/ if normative — the wiki points, it never restates). The wiki is
-descriptive and always loses conflicts with code and docs/.
+exploration; open pages relevant to your task. After substantive work,
+distill new gotchas/decisions/corrections into the wiki (or into docs/ if
+normative — the wiki points, it never restates): edit/add pages under
+`wiki/pages/`, then regenerate `manifest.json`/`INDEX.md` by cloning
+`sunto` fresh (`git clone https://github.com/HagaleTechnologies/sunto.git`,
+stdlib-only Python, no install needed) and running its `bin/wiki-lint
+--manifest ./wiki > wiki/manifest.json` and `bin/wiki-lint --index ./wiki >
+wiki/INDEX.md` (no `/wiki-update` skill exists in this harness — do this
+manually). The wiki is descriptive and always loses conflicts with code
+and docs/.
 
 ## Multi-agent hygiene
 
