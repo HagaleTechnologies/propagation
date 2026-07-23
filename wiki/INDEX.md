@@ -9,6 +9,7 @@
 - [Why is the prediction surface columnar and integer-quantized?](pages/decision-prediction-contract.md) — The prediction surface contract (v1) uses columnar parallel arrays (not
 - [What will bite you about this repo's auto-merge-on-open workflow?](pages/gotcha-auto-merge-workflow.md) — `.github/workflows/auto-merge-own-prs.yml` enables `gh pr merge --auto
 - [What will bite you about evaluation (blocked CV, full label set)?](pages/gotcha-eval-rules.md) — Three eval rules will produce silently invalid results if violated: (1) random
+- [What will bite you about a leakage audit that only blocklists columns by name?](pages/gotcha-label-leakage-via-nulls.md) — M2's leakage audit (`tests/test_leakage.py`) blocklisted label columns by
 - [What will bite you if you only test against mocked externals/binaries?](pages/gotcha-live-system-bugs.md) — M1 shipped through nine task-level reviews and a whole-branch review with a
 - [What will bite you if you add a cqdx dependency?](pages/gotcha-open-closed-boundary.md) — This repo is intended to be open source; cqdx is closed. If you import any
 - [What will bite you about implementing from a plan drafted before its dependencies merged?](pages/gotcha-plan-drift-before-merge.md) — A single PR (#10) once drafted implementation plans for M1 through M4, all

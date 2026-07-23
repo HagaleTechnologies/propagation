@@ -10,23 +10,26 @@ sources:
   - ROADMAP.md
   - CLAUDE.md
 verified:
-  commit: f6ae8c3
-  date: 2026-07-19
+  commit: 808948a
+  date: 2026-07-23
 links:
   - decision-p533-baseline
   - decision-m1-ladder-exception
+  - gotcha-label-leakage-via-nulls
 ---
 ML-based HF propagation nowcasting: train on real path-report data
 (WSPRnet, RBN, PSKReporter) to predict band openings at (tx Maidenhead field,
 rx field, band) × 15-minute window, benchmarked honestly against ITU-R P.533
 and climatology. The novel methodological contribution is monitor-normalized
 negative sampling, which handles observation bias in sparse amateur-radio
-reception reports. M0 (PR #11) and M1 (PR #13) are both complete: the
-WSPRnet→lake→labels→climatology→eval pipeline runs end-to-end from empty
-`data/`, and `scripts/eval_m1.py` adds a vendored ITU-R P.533 baseline to the
-same headline comparison. P.533 currently loses badly to climatology on Brier
-— see [[decision-p533-baseline]] and [[decision-m1-ladder-exception]] for
-why M2 proceeded anyway. Next step is M2 (LightGBM) in ROADMAP.md.
+reception reports. M0 (PR #11), M1 (PR #13), and M2 (PR #20, PR #27) are all
+complete: the WSPRnet→lake→labels→climatology→P.533→GBT→eval pipeline runs
+end-to-end from empty `data/`, and `scripts/eval_m2.py`'s live acceptance run
+confirms GBT genuinely beats both climatology and P.533 on Brier/log-loss
+across 20m+10m and 3 held-out 2024 months incl. the Gannon storm — see
+[[decision-p533-baseline]], [[decision-m1-ladder-exception]], and
+`docs/DECISIONS/0005-m2-acceptance-result.md`. Next step is M3 (scale to
+all bands/horizons, RBN + live PSKReporter) in ROADMAP.md.
 
 ## Where things live
 

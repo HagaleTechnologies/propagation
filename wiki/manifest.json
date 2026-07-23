@@ -1,6 +1,6 @@
 {
-  "generated_at": "2026-07-19T04:21:07Z",
-  "head_commit": "f6ae8c3",
+  "generated_at": "2026-07-23T02:44:09Z",
+  "head_commit": "808948a",
   "pages": [
     {
       "hash": "sha256:eebe8dc967e6a0c6fc179da2849d4275b78f6fbd4c785034ffcdf62b5c3545e1",
@@ -154,6 +154,28 @@
       "visibility": "private"
     },
     {
+      "hash": "sha256:4fe52d74fd6d6230ea47729f52e49d5816abdbaf9bcf36a0e961052907f74a93",
+      "id": "gotcha-label-leakage-via-nulls",
+      "kind": "gotcha",
+      "links": [
+        "decision-p533-baseline",
+        "overview"
+      ],
+      "locked": false,
+      "maintainer": "agent",
+      "path": "pages/gotcha-label-leakage-via-nulls.md",
+      "sources": [
+        "src/propagation/features/matrix.py",
+        "src/propagation/features/labels.py",
+        "tests/test_leakage.py"
+      ],
+      "status": "current",
+      "title": "What will bite you about a leakage audit that only blocklists columns by name?",
+      "verified_commit": "808948a",
+      "verified_date": "2026-07-23",
+      "visibility": "private"
+    },
+    {
       "hash": "sha256:595d8db40e89d9cbcb67c572ca7858800d5847dddfa32c0d31afe5c879822d94",
       "id": "gotcha-live-system-bugs",
       "kind": "gotcha",
@@ -258,12 +280,13 @@
       "visibility": "private"
     },
     {
-      "hash": "sha256:0fd7c0f4fa270e0650648333c6a23d5dc6aeaa96e71972760516c524d749fadf",
+      "hash": "sha256:585986bd00e66eff9f2c72b0cb981cf48b262a9430a9d1edf46fec26dc03d9e3",
       "id": "overview",
       "kind": "overview",
       "links": [
         "decision-p533-baseline",
-        "decision-m1-ladder-exception"
+        "decision-m1-ladder-exception",
+        "gotcha-label-leakage-via-nulls"
       ],
       "locked": false,
       "maintainer": "agent",
@@ -276,8 +299,8 @@
       ],
       "status": "current",
       "title": "propagation \u2014 what is this and where do things live?",
-      "verified_commit": "f6ae8c3",
-      "verified_date": "2026-07-19",
+      "verified_commit": "808948a",
+      "verified_date": "2026-07-23",
       "visibility": "private"
     },
     {
