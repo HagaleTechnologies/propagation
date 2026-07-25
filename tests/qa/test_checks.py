@@ -108,6 +108,39 @@ def test_check2_distance_filter_insufficient_data_for_short_pair():
     assert "distance range" in result.detail
 
 
+def _grayline_row(hour, terminator_hrs, zenith, open_, month=6):
+    return {
+        "window_start": dt.datetime(2026, month, 1, hour, 0, tzinfo=dt.timezone.utc),
+        "tx_field": "FN", "rx_field": "PM", "band": "40m", "open": open_,
+        "midpoint_hours_since_terminator": terminator_hrs,
+        "midpoint_solar_zenith": zenith,
+    }
+
+
+def test_check3_grayline_real_computation_pass():
+    # FN-PM is ~10894km apart (>6Mm DX threshold). Gray-line rows (near
+    # terminator) open more often than midday rows.
+    rows = (
+        [_grayline_row(6, terminator_hrs=0.5, zenith=88.0, open_=1) for _ in range(8)]
+        + [_grayline_row(6, terminator_hrs=0.5, zenith=88.0, open_=0) for _ in range(2)]
+        + [_grayline_row(12, terminator_hrs=5.0, zenith=20.0, open_=1) for _ in range(2)]
+        + [_grayline_row(12, terminator_hrs=5.0, zenith=20.0, open_=0) for _ in range(8)]
+    )
+    result = check_grayline_40m(_df(rows))
+    assert result.status == "pass"
+
+
+def test_check3_grayline_real_computation_fail():
+    rows = (
+        [_grayline_row(6, terminator_hrs=0.5, zenith=88.0, open_=1) for _ in range(2)]
+        + [_grayline_row(6, terminator_hrs=0.5, zenith=88.0, open_=0) for _ in range(8)]
+        + [_grayline_row(12, terminator_hrs=5.0, zenith=20.0, open_=1) for _ in range(8)]
+        + [_grayline_row(12, terminator_hrs=5.0, zenith=20.0, open_=0) for _ in range(2)]
+    )
+    result = check_grayline_40m(_df(rows))
+    assert result.status == "fail"
+
+
 def test_check3_gate_reports_insufficient_data_without_solar_features():
     result = check_grayline_40m(_df([_row(14, "FN", "DM", "40m", 1)]))
     assert result.status == "insufficient_data"

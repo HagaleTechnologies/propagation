@@ -138,16 +138,50 @@ def check_lowband_diurnal(labels: pl.DataFrame) -> QAResult:
 
 
 def check_grayline_40m(labels: pl.DataFrame) -> QAResult:
-    """QA check 3: 40m gray-line open-rate peak near the terminator. Needs
-    solar-terminator features (features/solar.py, scheduled for M2) to locate
-    the terminator per path-cell; M0 has no such feature, so this is a real,
-    tested precondition gate, not a stub of the eventual arithmetic."""
+    """QA check 3 (docs/SPEC-labeling.md sec 6): 40m gray-line open-rate
+    local max within +/-1h of the midpoint terminator vs midday, DX paths
+    > 6 Mm. Requires features/solar.py's midpoint_hours_since_terminator
+    and midpoint_solar_zenith already joined onto `labels`; without them
+    this stays a gate (M0/M1 runs have no solar features to check against)."""
+    if "midpoint_hours_since_terminator" not in labels.columns or "midpoint_solar_zenith" not in labels.columns:
+        return QAResult(
+            3, "grayline_40m", "insufficient_data",
+            "terminator-relative timing requires features/solar.py joined onto labels",
+        )
     subset = labels.filter(pl.col("band") == "40m")
     if subset.height == 0:
         return QAResult(3, "grayline_40m", "insufficient_data", "no 40m labels in this run")
+
+    pairs = subset.select(["tx_field", "rx_field"]).unique().to_dicts()
+    dist_by_pair = {}
+    for p in pairs:
+        try:
+            lat1, lon1 = grid_to_latlon(p["tx_field"])
+            lat2, lon2 = grid_to_latlon(p["rx_field"])
+            dist_by_pair[(p["tx_field"], p["rx_field"])] = great_circle_km(lat1, lon1, lat2, lon2)
+        except ValueError:
+            continue
+    working = subset.with_columns(
+        pl.struct(["tx_field", "rx_field"])
+        .map_elements(
+            lambda r: dist_by_pair.get((r["tx_field"], r["rx_field"])), return_dtype=pl.Float64
+        )
+        .alias("distance_km")
+    ).filter(pl.col("distance_km") > 6000)
+    if working.height == 0:
+        return QAResult(3, "grayline_40m", "insufficient_data", "no >6Mm 40m paths")
+
+    terminator = working.filter(pl.col("midpoint_hours_since_terminator").abs() <= 1.0)
+    midday = working.filter(pl.col("midpoint_solar_zenith") <= 30.0)
+    if terminator.height == 0 or midday.height == 0:
+        return QAResult(3, "grayline_40m", "insufficient_data", "missing gray-line or midday windows")
+
+    terminator_rate = float(terminator["open"].cast(pl.Float64).mean())
+    midday_rate = float(midday["open"].cast(pl.Float64).mean())
+    status = "pass" if terminator_rate > midday_rate else "fail"
     return QAResult(
-        3, "grayline_40m", "insufficient_data",
-        "terminator-relative timing requires features/solar.py (M2); not computable yet",
+        3, "grayline_40m", status,
+        f"gray-line open-rate={terminator_rate:.2f} vs midday open-rate={midday_rate:.2f}",
     )
 
 
