@@ -64,15 +64,22 @@ def add_band_feature(labels: pl.DataFrame) -> pl.DataFrame:
     )
 
 
-def build_feature_matrix(labels: pl.DataFrame, full_history: pl.DataFrame, omni: pl.DataFrame) -> pl.DataFrame:
+def build_feature_matrix(
+    labels: pl.DataFrame, full_history: pl.DataFrame, omni: pl.DataFrame, horizon_hours: float = 0.0
+) -> pl.DataFrame:
     """`labels` are the rows to build features FOR; `full_history` is the
     complete, unsampled label set for the same period (history features
     need other cells' activity, not just the rows being scored);
-    `omni` is `propagation.data.spaceweather.fetch_omni2_range`'s output."""
+    `omni` is `propagation.data.spaceweather.fetch_omni2_range`'s output.
+    `horizon_hours` (default 0) shifts only the as-of-now feature builders
+    (space weather, AR history) to prediction_time = window_start -
+    horizon_hours; time/geometry/solar features stay anchored at the target
+    window_start since they're knowable in advance (docs/superpowers/specs/
+    2026-07-24-m3-band-horizon-expansion-design.md sec 2)."""
     out = add_time_features(labels)
     out = add_geometry_features(out)
     out = add_solar_features(out)
     out = add_band_feature(out)
-    out = add_spaceweather_features(out, omni)
-    out = add_history_features(full_history, out)
+    out = add_spaceweather_features(out, omni, horizon_hours=horizon_hours)
+    out = add_history_features(full_history, out, horizon_hours=horizon_hours)
     return out

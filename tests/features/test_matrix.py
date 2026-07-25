@@ -1,4 +1,4 @@
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 
 import polars as pl
 import pytest
@@ -39,6 +39,27 @@ def test_build_feature_matrix_produces_every_declared_column(tmp_path):
     for col in FEATURE_COLUMNS:
         assert col in out.columns, col
     assert out.height == 1
+
+
+def test_build_feature_matrix_forwards_horizon_hours_to_asof_features():
+    start = datetime(2026, 1, 1, tzinfo=timezone.utc)
+    times = [start + timedelta(hours=i) for i in range(72)]
+    omni = pl.DataFrame({
+        "time": times, "kp": [float(i) for i in range(72)], "f107": [100.0] * 72,
+        "bz_gsm": [1.0] * 72, "solar_wind_speed": [400.0] * 72, "dst": [-10.0] * 72,
+    }, schema_overrides={"time": pl.Datetime("us", "UTC")})
+    ts = start + timedelta(hours=48)
+    labels = pl.DataFrame({
+        "window_start": [ts], "tx_field": ["FN"], "rx_field": ["DM"], "band": ["20m"],
+        "open": [1], "n_spots": [3], "snr_ft8eq_p50": [10.0],
+    }, schema_overrides={"window_start": pl.Datetime("us", "UTC")})
+    out_h0 = build_feature_matrix(labels, full_history=labels, omni=omni, horizon_hours=0.0)
+    out_h6 = build_feature_matrix(labels, full_history=labels, omni=omni, horizon_hours=6.0)
+    assert out_h0["kp_now"][0] == pytest.approx(48.0)
+    assert out_h6["kp_now"][0] == pytest.approx(42.0)
+    # target-time features (window_start, time-of-day) are horizon-invariant
+    assert out_h0["window_start"][0] == out_h6["window_start"][0] == ts
+    assert out_h0["hour_sin"][0] == out_h6["hour_sin"][0]
 
 
 def test_add_band_feature_is_ordinal_and_monotonic_in_band_order():
