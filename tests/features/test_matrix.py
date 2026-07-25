@@ -3,7 +3,12 @@ from datetime import datetime, timezone
 import polars as pl
 import pytest
 
-from propagation.features.matrix import FEATURE_COLUMNS, add_time_features, build_feature_matrix
+from propagation.features.matrix import (
+    FEATURE_COLUMNS,
+    add_band_feature,
+    add_time_features,
+    build_feature_matrix,
+)
 
 
 def test_add_time_features_sin_cos_pairs_are_unit_circle():
@@ -34,3 +39,15 @@ def test_build_feature_matrix_produces_every_declared_column(tmp_path):
     for col in FEATURE_COLUMNS:
         assert col in out.columns, col
     assert out.height == 1
+
+
+def test_add_band_feature_is_ordinal_and_monotonic_in_band_order():
+    from propagation.features.history import BAND_ORDER
+    labels = pl.DataFrame({"band": BAND_ORDER})
+    out = add_band_feature(labels)
+    assert out["band_ordinal"].to_list() == list(range(len(BAND_ORDER)))
+
+
+def test_feature_columns_includes_band_ordinal_not_raw_band():
+    assert "band_ordinal" in FEATURE_COLUMNS
+    assert "band" not in FEATURE_COLUMNS

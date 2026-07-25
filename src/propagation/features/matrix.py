@@ -17,11 +17,13 @@ import math
 import polars as pl
 
 from propagation.features.geometry import add_geometry_features
-from propagation.features.history import add_history_features
+from propagation.features.history import BAND_ORDER, add_history_features
 from propagation.features.solar import add_solar_features
 from propagation.features.spaceweather import add_spaceweather_features
 
 _TIME_COLS = ["hour_sin", "hour_cos", "doy_sin", "doy_cos", "month"]
+_BAND_COLS = ["band_ordinal"]
+_BAND_ORDINAL = {band: i for i, band in enumerate(BAND_ORDER)}
 _GEOMETRY_COLS = [
     "distance_km", "bearing_deg", "midpoint_lat", "midpoint_lon",
     "tx_control_lat", "tx_control_lon", "rx_control_lat", "rx_control_lon",
@@ -43,7 +45,7 @@ _HISTORY_COLS = [
     for stat in ("n", "snr")
     for lb in _HISTORY_LOOKBACKS
 ] + ["same_hour_yesterday_open"]
-FEATURE_COLUMNS = _TIME_COLS + _GEOMETRY_COLS + _SOLAR_COLS + _SPACEWEATHER_COLS + _HISTORY_COLS
+FEATURE_COLUMNS = _TIME_COLS + _BAND_COLS + _GEOMETRY_COLS + _SOLAR_COLS + _SPACEWEATHER_COLS + _HISTORY_COLS
 
 
 def add_time_features(labels: pl.DataFrame) -> pl.DataFrame:
@@ -56,6 +58,12 @@ def add_time_features(labels: pl.DataFrame) -> pl.DataFrame:
     )
 
 
+def add_band_feature(labels: pl.DataFrame) -> pl.DataFrame:
+    return labels.with_columns(
+        pl.col("band").replace_strict(_BAND_ORDINAL, return_dtype=pl.Int64).alias("band_ordinal")
+    )
+
+
 def build_feature_matrix(labels: pl.DataFrame, full_history: pl.DataFrame, omni: pl.DataFrame) -> pl.DataFrame:
     """`labels` are the rows to build features FOR; `full_history` is the
     complete, unsampled label set for the same period (history features
@@ -64,6 +72,7 @@ def build_feature_matrix(labels: pl.DataFrame, full_history: pl.DataFrame, omni:
     out = add_time_features(labels)
     out = add_geometry_features(out)
     out = add_solar_features(out)
+    out = add_band_feature(out)
     out = add_spaceweather_features(out, omni)
     out = add_history_features(full_history, out)
     return out

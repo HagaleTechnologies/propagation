@@ -47,7 +47,7 @@ import polars as pl
 AVAIL_BUFFER_MIN = 20  # 15-min window duration + Δ_avail=5min
 
 _LOOKBACKS = {"15m": "15m", "1h": "1h", "3h": "3h", "24h": "24h"}
-_BAND_ORDER = ["160m", "80m", "60m", "40m", "30m", "20m", "17m", "15m", "12m", "10m", "6m"]
+BAND_ORDER = ["160m", "80m", "60m", "40m", "30m", "20m", "17m", "15m", "12m", "10m", "6m"]
 
 
 def field_neighbors(field: str) -> list[str]:
@@ -79,12 +79,12 @@ def field_neighbors(field: str) -> list[str]:
 
 
 def _adjacent_bands(band: str) -> list[str]:
-    i = _BAND_ORDER.index(band)
+    i = BAND_ORDER.index(band)
     out = []
     if i > 0:
-        out.append(_BAND_ORDER[i - 1])
-    if i < len(_BAND_ORDER) - 1:
-        out.append(_BAND_ORDER[i + 1])
+        out.append(BAND_ORDER[i - 1])
+    if i < len(BAND_ORDER) - 1:
+        out.append(BAND_ORDER[i + 1])
     return out
 
 
@@ -267,7 +267,7 @@ def add_history_features(full_history: pl.DataFrame, target_rows: pl.DataFrame) 
     # band -- not `history_narrow` (see _relation_via_expanded_anchors) --
     # keeping each expanded row's own original band in `_orig_band`.
     band_map = pl.DataFrame(
-        [(band, adj) for band in _BAND_ORDER for adj in _adjacent_bands(band)],
+        [(band, adj) for band in BAND_ORDER for adj in _adjacent_bands(band)],
         schema=["_orig_band", "band"], orient="row",
     )
     adj_band_anchor_source = (
