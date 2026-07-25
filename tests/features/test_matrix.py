@@ -1,9 +1,14 @@
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 
 import polars as pl
 import pytest
 
-from propagation.features.matrix import FEATURE_COLUMNS, add_time_features, build_feature_matrix
+from propagation.features.matrix import (
+    FEATURE_COLUMNS,
+    add_band_feature,
+    add_time_features,
+    build_feature_matrix,
+)
 
 
 def test_add_time_features_sin_cos_pairs_are_unit_circle():
@@ -34,3 +39,64 @@ def test_build_feature_matrix_produces_every_declared_column(tmp_path):
     for col in FEATURE_COLUMNS:
         assert col in out.columns, col
     assert out.height == 1
+
+
+def test_build_feature_matrix_forwards_horizon_hours_to_asof_features():
+    start = datetime(2026, 1, 1, tzinfo=timezone.utc)
+    times = [start + timedelta(hours=i) for i in range(72)]
+    omni = pl.DataFrame({
+        "time": times, "kp": [float(i) for i in range(72)], "f107": [100.0] * 72,
+        "bz_gsm": [1.0] * 72, "solar_wind_speed": [400.0] * 72, "dst": [-10.0] * 72,
+    }, schema_overrides={"time": pl.Datetime("us", "UTC")})
+    ts = start + timedelta(hours=48)
+    labels = pl.DataFrame({
+        "window_start": [ts], "tx_field": ["FN"], "rx_field": ["DM"], "band": ["20m"],
+        "open": [1], "n_spots": [3], "snr_ft8eq_p50": [10.0],
+    }, schema_overrides={"window_start": pl.Datetime("us", "UTC")})
+    out_h0 = build_feature_matrix(labels, full_history=labels, omni=omni, horizon_hours=0.0)
+    out_h6 = build_feature_matrix(labels, full_history=labels, omni=omni, horizon_hours=6.0)
+    assert out_h0["kp_now"][0] == pytest.approx(48.0)
+    assert out_h6["kp_now"][0] == pytest.approx(42.0)
+    # target-time features (window_start, time-of-day) are horizon-invariant
+    assert out_h0["window_start"][0] == out_h6["window_start"][0] == ts
+    assert out_h0["hour_sin"][0] == out_h6["hour_sin"][0]
+
+
+def test_build_feature_matrix_forwards_horizon_hours_to_history_features():
+    start = datetime(2026, 1, 1, tzinfo=timezone.utc)
+    omni = pl.DataFrame({
+        "time": [start], "kp": [3.0], "f107": [100.0],
+        "bz_gsm": [1.0], "solar_wind_speed": [400.0], "dst": [-10.0],
+    }, schema_overrides={"time": pl.Datetime("us", "UTC")})
+    ts = start + timedelta(hours=48)
+    source_ts = ts - timedelta(hours=2)
+    full_history = pl.DataFrame({
+        "window_start": [source_ts],
+        "tx_field": ["FN"], "rx_field": ["DM"], "band": ["20m"],
+        "n_spots": [5], "snr_ft8eq_p50": [10.0], "open": [1],
+    }, schema_overrides={"window_start": pl.Datetime("us", "UTC")})
+    labels = pl.DataFrame({
+        "window_start": [ts], "tx_field": ["FN"], "rx_field": ["DM"], "band": ["20m"],
+        "open": [1], "n_spots": [3], "snr_ft8eq_p50": [10.0],
+    }, schema_overrides={"window_start": pl.Datetime("us", "UTC")})
+    out_h0 = build_feature_matrix(labels, full_history=full_history, omni=omni, horizon_hours=0.0)
+    out_h6 = build_feature_matrix(labels, full_history=full_history, omni=omni, horizon_hours=6.0)
+    # source row is 2h before the target's own window_start: visible in the
+    # 24h trailing window at h=0 (prediction_time=ts), but NOT at h=6
+    # (prediction_time=ts-6h, which is BEFORE the source row) -- proves
+    # build_feature_matrix's add_history_features(..., horizon_hours=...)
+    # call site actually forwards the parameter, not just add_spaceweather_features's.
+    assert out_h0["same_cell_n_24h"][0] == 5
+    assert out_h6["same_cell_n_24h"][0] == 0
+
+
+def test_add_band_feature_is_ordinal_and_monotonic_in_band_order():
+    from propagation.features.history import BAND_ORDER
+    labels = pl.DataFrame({"band": BAND_ORDER})
+    out = add_band_feature(labels)
+    assert out["band_ordinal"].to_list() == list(range(len(BAND_ORDER)))
+
+
+def test_feature_columns_includes_band_ordinal_not_raw_band():
+    assert "band_ordinal" in FEATURE_COLUMNS
+    assert "band" not in FEATURE_COLUMNS

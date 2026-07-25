@@ -55,3 +55,18 @@ def test_missing_omni_coverage_gives_nulls_not_a_crash():
     }, schema_overrides={"window_start": pl.Datetime("us", "UTC")})
     out = add_spaceweather_features(labels, omni)
     assert out["kp_now"][0] is None
+
+
+def test_horizon_hours_shifts_the_asof_reference_point():
+    start = datetime(2026, 1, 1, tzinfo=timezone.utc)
+    omni = _omni(start, 72, kp_fn=lambda i: float(i), f107_fn=lambda i: 100.0)
+    labels = pl.DataFrame({
+        "window_start": [start + timedelta(hours=48)],
+    }, schema_overrides={"window_start": pl.Datetime("us", "UTC")})
+    out_h0 = add_spaceweather_features(labels, omni, horizon_hours=0.0)
+    out_h6 = add_spaceweather_features(labels, omni, horizon_hours=6.0)
+    assert out_h0["kp_now"][0] == pytest.approx(48.0)
+    assert out_h6["kp_now"][0] == pytest.approx(42.0)
+    assert out_h6["kp_lag3h"][0] == pytest.approx(39.0)
+    # the target's real window_start must be unchanged on the output
+    assert out_h0["window_start"][0] == out_h6["window_start"][0] == start + timedelta(hours=48)

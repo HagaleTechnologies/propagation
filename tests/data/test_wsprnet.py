@@ -6,6 +6,7 @@ import pytest
 from propagation.data.wsprnet import (
     WSPR_BAND_CODE_TO_BAND,
     extract_wsprnet,
+    extract_wsprnet_bands,
     parse_wsprnet_row,
 )
 
@@ -81,3 +82,18 @@ def test_extract_wsprnet_chunking_matches_single_chunk_result(gz_fixture):
     assert chunked.n_lines_read == unchunked.n_lines_read
     assert chunked.n_parsed == unchunked.n_parsed
     assert chunked.rejection_counts == unchunked.rejection_counts
+
+
+def test_extract_wsprnet_bands_matches_separate_single_band_calls(gz_fixture):
+    bands = ["20m", "30m"]
+    combined = extract_wsprnet_bands(gz_fixture, bands=bands)
+    assert set(combined) == set(bands)
+    for b in bands:
+        single = extract_wsprnet(gz_fixture, band=b)
+        assert combined[b].spots.equals(single.spots)
+        assert combined[b].n_parsed == single.n_parsed
+        assert combined[b].n_qualifying == single.n_qualifying
+        assert combined[b].rejection_counts == single.rejection_counts
+    # n_lines_read counts every line in the archive regardless of band (same
+    # semantics as extract_wsprnet's own n_lines_read) -- shared across bands.
+    assert combined["20m"].n_lines_read == combined["30m"].n_lines_read == 4

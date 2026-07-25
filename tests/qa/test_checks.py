@@ -108,6 +108,39 @@ def test_check2_distance_filter_insufficient_data_for_short_pair():
     assert "distance range" in result.detail
 
 
+def _grayline_row(hour, terminator_hrs, zenith, open_, month=6):
+    return {
+        "window_start": dt.datetime(2026, month, 1, hour, 0, tzinfo=dt.timezone.utc),
+        "tx_field": "FN", "rx_field": "PM", "band": "40m", "open": open_,
+        "midpoint_hours_since_terminator": terminator_hrs,
+        "midpoint_solar_zenith": zenith,
+    }
+
+
+def test_check3_grayline_real_computation_pass():
+    # FN-PM is ~10894km apart (>6Mm DX threshold). Gray-line rows (near
+    # terminator) open more often than midday rows.
+    rows = (
+        [_grayline_row(6, terminator_hrs=0.5, zenith=88.0, open_=1) for _ in range(8)]
+        + [_grayline_row(6, terminator_hrs=0.5, zenith=88.0, open_=0) for _ in range(2)]
+        + [_grayline_row(12, terminator_hrs=5.0, zenith=20.0, open_=1) for _ in range(2)]
+        + [_grayline_row(12, terminator_hrs=5.0, zenith=20.0, open_=0) for _ in range(8)]
+    )
+    result = check_grayline_40m(_df(rows))
+    assert result.status == "pass"
+
+
+def test_check3_grayline_real_computation_fail():
+    rows = (
+        [_grayline_row(6, terminator_hrs=0.5, zenith=88.0, open_=1) for _ in range(2)]
+        + [_grayline_row(6, terminator_hrs=0.5, zenith=88.0, open_=0) for _ in range(8)]
+        + [_grayline_row(12, terminator_hrs=5.0, zenith=20.0, open_=1) for _ in range(8)]
+        + [_grayline_row(12, terminator_hrs=5.0, zenith=20.0, open_=0) for _ in range(2)]
+    )
+    result = check_grayline_40m(_df(rows))
+    assert result.status == "fail"
+
+
 def test_check3_gate_reports_insufficient_data_without_solar_features():
     result = check_grayline_40m(_df([_row(14, "FN", "DM", "40m", 1)]))
     assert result.status == "insufficient_data"
@@ -140,8 +173,85 @@ def test_check5_reciprocity():
     assert result.status in {"pass", "insufficient_data"}
 
 
+def _solar_cycle_row(month_idx, f107, open_):
+    # Create one row per month, with proper calendar month progression
+    # month_idx 0 -> Jan 2026, 1 -> Feb 2026, etc.
+    year = 2026 + (month_idx // 12)
+    month = (month_idx % 12) + 1
+    return {
+        "window_start": dt.datetime(year, month, 1, tzinfo=dt.timezone.utc),
+        "tx_field": "FN", "rx_field": "PM", "band": "10m", "open": open_,
+        "f107_daily": f107,
+    }
+
+
+def test_check6_solar_cycle_real_computation_pass():
+    # 12 months, f107 rising linearly; monthly open-rate rises in lockstep
+    # (m/11 out of 11 rows/month) -- near-perfect positive correlation.
+    rows = []
+    for m in range(12):
+        f107 = 70.0 + m * 10.0
+        n_open = m
+        rows += [_solar_cycle_row(m, f107, open_=1) for _ in range(n_open)]
+        rows += [_solar_cycle_row(m, f107, open_=0) for _ in range(11 - n_open)]
+    result = check_solar_cycle(_df(rows))
+    assert result.status == "pass"
+
+
+def test_check6_solar_cycle_real_computation_fail():
+    # Same f107 ramp, but open-rate is ANTI-correlated with it.
+    rows = []
+    for m in range(12):
+        f107 = 70.0 + m * 10.0
+        n_open = 11 - m
+        rows += [_solar_cycle_row(m, f107, open_=1) for _ in range(n_open)]
+        rows += [_solar_cycle_row(m, f107, open_=0) for _ in range(11 - n_open)]
+    result = check_solar_cycle(_df(rows))
+    assert result.status == "fail"
+
+
 def test_check6_gate_insufficient_data_single_month():
     result = check_solar_cycle(_df([_row(14, "FN", "DM", "10m", 1)]))
+    assert result.status == "insufficient_data"
+
+
+def _storm_row(hour, month, kp, open_, geomag_lat=75.0):
+    return {
+        "window_start": dt.datetime(2026, month, 1, hour, 0, tzinfo=dt.timezone.utc),
+        "tx_field": "FN", "rx_field": "DM", "band": "20m", "open": open_,
+        "kp_now": kp, "midpoint_geomag_lat": geomag_lat,
+    }
+
+
+def test_check7_storm_response_real_computation_pass():
+    # Same (band=20m, hour=12, month=6) bucket in both regimes: storm
+    # open-rate 1/10, quiet open-rate 8/10 -> ratio 0.125 <= 0.5.
+    rows = (
+        [_storm_row(12, 6, kp=7.0, open_=0) for _ in range(9)]
+        + [_storm_row(12, 6, kp=7.0, open_=1)]
+        + [_storm_row(12, 6, kp=1.0, open_=1) for _ in range(8)]
+        + [_storm_row(12, 6, kp=1.0, open_=0) for _ in range(2)]
+    )
+    result = check_storm_response(_df(rows), kp_max=7.0)
+    assert result.status == "pass"
+
+
+def test_check7_storm_response_real_computation_fail():
+    # storm open-rate 9/10, quiet open-rate 8/10 -> ratio 1.125 > 0.5.
+    rows = (
+        [_storm_row(12, 6, kp=7.0, open_=1) for _ in range(9)]
+        + [_storm_row(12, 6, kp=7.0, open_=0)]
+        + [_storm_row(12, 6, kp=1.0, open_=1) for _ in range(8)]
+        + [_storm_row(12, 6, kp=1.0, open_=0) for _ in range(2)]
+    )
+    result = check_storm_response(_df(rows), kp_max=7.0)
+    assert result.status == "fail"
+
+
+def test_check7_insufficient_data_without_spaceweather_columns():
+    # kp_max clears the >=5 gate, but the frame still lacks kp_now/
+    # midpoint_geomag_lat -- must still gate, not crash.
+    result = check_storm_response(_df([_row(14, "FN", "DM", "20m", 1)]), kp_max=6.0)
     assert result.status == "insufficient_data"
 
 

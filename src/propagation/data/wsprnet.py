@@ -152,3 +152,69 @@ def extract_wsprnet(archive_path: Path, band: str, chunk_size: int = 200_000) ->
         n_qualifying=spots.height,
         rejection_counts=rejection_counts,
     )
+
+
+def extract_wsprnet_bands(
+    archive_path: Path, bands: list[str], chunk_size: int = 200_000
+) -> dict[str, ExtractResult]:
+    """Single-pass variant of extract_wsprnet for multiple bands: a full
+    month's archive covers every band, so extracting N bands via N separate
+    extract_wsprnet calls re-decompresses and re-scans the same file N
+    times. This scans the archive once, bucketing qualifying rows per
+    requested band, using the same chunked-flush memory bound as
+    extract_wsprnet (see that function's docstring for the OOM history)."""
+    bands_set = set(bands)
+    rejection_counts: dict[str, dict[str, int]] = {b: {} for b in bands}
+    n_lines_read = 0
+    n_parsed: dict[str, int] = {b: 0 for b in bands}
+
+    with tempfile.TemporaryDirectory(prefix="wsprnet-extract-") as td_name:
+        td = Path(td_name)
+        rows: dict[str, list[dict]] = {b: [] for b in bands}
+        chunk_paths: dict[str, list[Path]] = {b: [] for b in bands}
+
+        def _flush(band: str) -> None:
+            if rows[band]:
+                chunk_path = td / f"{band}-chunk-{len(chunk_paths[band]):06d}.parquet"
+                pl.DataFrame(
+                    rows[band], schema_overrides={"ts": pl.Datetime("us", "UTC")}
+                ).write_parquet(chunk_path)
+                chunk_paths[band].append(chunk_path)
+                rows[band].clear()
+
+        with gzip.open(archive_path, "rt", encoding="ascii", errors="replace") as f:
+            for line in f:
+                if not line.strip():
+                    continue
+                n_lines_read += 1
+                parsed = parse_wsprnet_row(line)
+                if parsed is None or parsed["band"] not in bands_set:
+                    continue
+                band = parsed["band"]
+                n_parsed[band] += 1
+                parsed["ts"] = dt.datetime.fromtimestamp(parsed["ts"], tz=dt.timezone.utc)
+                ok, reason = is_qualifying_spot(parsed)
+                if not ok:
+                    rejection_counts[band][reason] = rejection_counts[band].get(reason, 0) + 1
+                    continue
+                rows[band].append(parsed)
+                if len(rows[band]) >= chunk_size:
+                    _flush(band)
+        for b in bands:
+            _flush(b)
+
+        results: dict[str, ExtractResult] = {}
+        for b in bands:
+            if not chunk_paths[b]:
+                spots = pl.DataFrame(schema=SPOT_SCHEMA)
+            else:
+                spots = pl.concat([pl.read_parquet(p) for p in chunk_paths[b]], how="vertical_relaxed")
+            for col in SPOT_SCHEMA:
+                if col not in spots.columns:
+                    spots = spots.with_columns(pl.lit(None).alias(col))
+            spots = dedup_spots(spots)
+            results[b] = ExtractResult(
+                spots=spots, n_lines_read=n_lines_read, n_parsed=n_parsed[b],
+                n_qualifying=spots.height, rejection_counts=rejection_counts[b],
+            )
+        return results

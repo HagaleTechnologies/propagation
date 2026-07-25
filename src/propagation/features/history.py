@@ -47,7 +47,7 @@ import polars as pl
 AVAIL_BUFFER_MIN = 20  # 15-min window duration + Δ_avail=5min
 
 _LOOKBACKS = {"15m": "15m", "1h": "1h", "3h": "3h", "24h": "24h"}
-_BAND_ORDER = ["160m", "80m", "60m", "40m", "30m", "20m", "17m", "15m", "12m", "10m", "6m"]
+BAND_ORDER = ["160m", "80m", "60m", "40m", "30m", "20m", "17m", "15m", "12m", "10m", "6m"]
 
 
 def field_neighbors(field: str) -> list[str]:
@@ -79,12 +79,12 @@ def field_neighbors(field: str) -> list[str]:
 
 
 def _adjacent_bands(band: str) -> list[str]:
-    i = _BAND_ORDER.index(band)
+    i = BAND_ORDER.index(band)
     out = []
     if i > 0:
-        out.append(_BAND_ORDER[i - 1])
-    if i < len(_BAND_ORDER) - 1:
-        out.append(_BAND_ORDER[i + 1])
+        out.append(BAND_ORDER[i - 1])
+    if i < len(BAND_ORDER) - 1:
+        out.append(BAND_ORDER[i + 1])
     return out
 
 
@@ -230,7 +230,35 @@ def _relation_via_expanded_anchors(
     return _finalize_snr(combined.rename({orig_col: varying_col}), prefix)
 
 
-def add_history_features(full_history: pl.DataFrame, target_rows: pl.DataFrame) -> pl.DataFrame:
+def add_history_features(
+    full_history: pl.DataFrame, target_rows: pl.DataFrame, horizon_hours: float = 0.0
+) -> pl.DataFrame:
+    """`horizon_hours=0` (default) reproduces M2's original as-of-
+    window_start behavior exactly. For horizon_hours > 0, every AR rolling
+    window re-anchors at prediction_time = window_start - horizon_hours by
+    temporarily overwriting `target_rows.window_start` with prediction_time
+    before running the (otherwise unchanged) relation logic below, then
+    restoring the real window_start on the output before returning -- this
+    keeps `history_narrow` (the real spot-activity timestamps being rolled
+    over) untouched while only the target anchor's own timestamp shifts,
+    matching docs/SPEC-labeling.md's "horizon is a training-time join
+    offset" framing.
+
+    Known tradeoff (uniform shift applies to same_hour_yesterday_open too):
+    for horizon_hours > 0, this point-lookup resolves to
+    window_start - horizon_hours - 24h, not window_start - 24h -- so for
+    h>0 it's no longer literally "same hour, one day prior" (e.g. at h=6h
+    it's 30h back, a different hour of day). Still leakage-safe (always
+    strictly before prediction_time); the true window_start - 24h value
+    would also be leakage-safe for every horizon in ROADMAP.md's set
+    (<=24h) and is arguably more predictive, but isn't what this uniform
+    shift computes. Left as-is deliberately (2026-07-24 M3 band/horizon
+    expansion design decision) for consistency with every other AR feature
+    in this function; revisit if the deferred full-scale production sweep
+    shows this costing real headline accuracy at h>0."""
+    shift = pl.duration(hours=horizon_hours)
+    target_rows = target_rows.with_columns((pl.col("window_start") - shift).alias("window_start"))
+
     if full_history.height == 0:
         full_history = pl.DataFrame(
             schema={"window_start": pl.Datetime("us", "UTC"), "tx_field": pl.Utf8, "rx_field": pl.Utf8,
@@ -267,7 +295,7 @@ def add_history_features(full_history: pl.DataFrame, target_rows: pl.DataFrame) 
     # band -- not `history_narrow` (see _relation_via_expanded_anchors) --
     # keeping each expanded row's own original band in `_orig_band`.
     band_map = pl.DataFrame(
-        [(band, adj) for band in _BAND_ORDER for adj in _adjacent_bands(band)],
+        [(band, adj) for band in BAND_ORDER for adj in _adjacent_bands(band)],
         schema=["_orig_band", "band"], orient="row",
     )
     adj_band_anchor_source = (
@@ -323,4 +351,4 @@ def add_history_features(full_history: pl.DataFrame, target_rows: pl.DataFrame) 
     )
     out = out.join(yesterday_src, on=["window_start", "tx_field", "rx_field", "band"], how="left")
 
-    return out
+    return out.with_columns((pl.col("window_start") + shift).alias("window_start"))

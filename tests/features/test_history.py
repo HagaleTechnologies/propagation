@@ -186,3 +186,18 @@ def test_self_referential_call_matches_production_pattern_no_fanout():
     assert cell_a_2am["same_cell_n_1h"][0] == 3
     assert cell_b_2am.height == 1
     assert cell_b_2am["same_cell_n_1h"][0] == 2
+
+
+def test_horizon_hours_shifts_history_anchor_to_prediction_time():
+    # Source row at 01:30. At horizon=0 (anchor=target's own window_start
+    # 02:00), the buffer-adjusted trailing 1h window is [01:00,01:40] --
+    # 01:30 counts. At horizon=1h (anchor=prediction_time=01:00), the same
+    # window becomes [00:00,00:40] -- 01:30 is now in the FUTURE relative to
+    # the anchor and must not count.
+    history = _frame([_row(1, 30, "FN", "DM", "20m", 1, 10.0)])
+    target = _frame([_row(2, 0, "FN", "DM", "20m", 0, None)])
+    assert add_history_features(history, target)["same_cell_n_1h"][0] == 1
+    out = add_history_features(history, target, horizon_hours=1.0)
+    assert out["same_cell_n_1h"][0] == 0
+    # window_start on the output must remain the target's real (unshifted) time
+    assert out["window_start"][0] == datetime(2026, 6, 1, 2, 0, tzinfo=timezone.utc)

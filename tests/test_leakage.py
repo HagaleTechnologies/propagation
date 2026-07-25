@@ -55,6 +55,16 @@ def test_spot_just_outside_availability_buffer_is_included():
     assert out["same_cell_n_24h"][0] == 1
 
 
+def test_asof_features_never_see_data_after_prediction_time_for_nonzero_horizon():
+    history = _frame([_row(20, 0, n=5, snr=20.0)])  # source at 20:00
+    target = _frame([_row(22, 0, n=0, snr=None)])    # target at 22:00
+    out_h0 = add_history_features(history, target, horizon_hours=0.0)
+    out_h6 = add_history_features(history, target, horizon_hours=6.0)
+    # same_cell_n_24h sums n_spots (5 here), not row count.
+    assert out_h0["same_cell_n_24h"][0] == 5  # legitimately visible: prediction_time=22:00
+    assert out_h6["same_cell_n_24h"][0] == 0  # NOT visible: prediction_time=16:00, source is after it
+
+
 def test_m2_blocked_cv_gap_is_the_48h_floor_not_widened():
     # ROADMAP.md M2: horizon up to +3h; ARCHITECTURE.md sec 4 item 5: AR
     # lookback up to 24h. 3 + 24 = 27 < 48 -> floor applies, unchanged from M0/M1.

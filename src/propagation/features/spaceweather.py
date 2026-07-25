@@ -12,13 +12,23 @@ from __future__ import annotations
 import polars as pl
 
 
-def add_spaceweather_features(labels: pl.DataFrame, omni: pl.DataFrame) -> pl.DataFrame:
+def add_spaceweather_features(
+    labels: pl.DataFrame, omni: pl.DataFrame, horizon_hours: float = 0.0
+) -> pl.DataFrame:
     """`omni` is `propagation.data.spaceweather.fetch_omni2_range`'s output
     (hourly, columns time/kp/f107/bz_gsm/solar_wind_speed/dst). All features
-    are as-of `window_start` via backward asof joins -- the most recent OMNI
-    hour AT OR BEFORE window_start, never a future one."""
+    are as-of `window_start - horizon_hours` (the prediction time) via
+    backward asof joins -- the most recent OMNI hour AT OR BEFORE prediction
+    time, never a future one. `horizon_hours=0` (default) reproduces M2's
+    original as-of-window_start behavior exactly. The returned frame's
+    `window_start` column is restored to the caller's original (unshifted)
+    values before returning, since downstream code joins feature output back
+    onto the label matrix by the label's own real window_start."""
     omni = omni.sort("time")
-    labels_sorted = labels.sort("window_start")
+    shift = pl.duration(hours=horizon_hours)
+    labels_sorted = labels.sort("window_start").with_columns(
+        (pl.col("window_start") - shift).alias("window_start")
+    )
 
     # 1h tolerance: hourly OMNI2 data means any covered window_start is at
     # most just under an hour past its backing OMNI row; anything further
@@ -85,4 +95,4 @@ def add_spaceweather_features(labels: pl.DataFrame, omni: pl.DataFrame) -> pl.Da
          f107_daily, f107_smoothed],
         how="horizontal_extend",
     )
-    return out
+    return out.with_columns((pl.col("window_start") + shift).alias("window_start"))

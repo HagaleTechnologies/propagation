@@ -17,11 +17,13 @@ import math
 import polars as pl
 
 from propagation.features.geometry import add_geometry_features
-from propagation.features.history import add_history_features
+from propagation.features.history import BAND_ORDER, add_history_features
 from propagation.features.solar import add_solar_features
 from propagation.features.spaceweather import add_spaceweather_features
 
 _TIME_COLS = ["hour_sin", "hour_cos", "doy_sin", "doy_cos", "month"]
+_BAND_COLS = ["band_ordinal"]
+_BAND_ORDINAL = {band: i for i, band in enumerate(BAND_ORDER)}
 _GEOMETRY_COLS = [
     "distance_km", "bearing_deg", "midpoint_lat", "midpoint_lon",
     "tx_control_lat", "tx_control_lon", "rx_control_lat", "rx_control_lon",
@@ -43,7 +45,7 @@ _HISTORY_COLS = [
     for stat in ("n", "snr")
     for lb in _HISTORY_LOOKBACKS
 ] + ["same_hour_yesterday_open"]
-FEATURE_COLUMNS = _TIME_COLS + _GEOMETRY_COLS + _SOLAR_COLS + _SPACEWEATHER_COLS + _HISTORY_COLS
+FEATURE_COLUMNS = _TIME_COLS + _BAND_COLS + _GEOMETRY_COLS + _SOLAR_COLS + _SPACEWEATHER_COLS + _HISTORY_COLS
 
 
 def add_time_features(labels: pl.DataFrame) -> pl.DataFrame:
@@ -56,14 +58,28 @@ def add_time_features(labels: pl.DataFrame) -> pl.DataFrame:
     )
 
 
-def build_feature_matrix(labels: pl.DataFrame, full_history: pl.DataFrame, omni: pl.DataFrame) -> pl.DataFrame:
+def add_band_feature(labels: pl.DataFrame) -> pl.DataFrame:
+    return labels.with_columns(
+        pl.col("band").replace_strict(_BAND_ORDINAL, return_dtype=pl.Int64).alias("band_ordinal")
+    )
+
+
+def build_feature_matrix(
+    labels: pl.DataFrame, full_history: pl.DataFrame, omni: pl.DataFrame, horizon_hours: float = 0.0
+) -> pl.DataFrame:
     """`labels` are the rows to build features FOR; `full_history` is the
     complete, unsampled label set for the same period (history features
     need other cells' activity, not just the rows being scored);
-    `omni` is `propagation.data.spaceweather.fetch_omni2_range`'s output."""
+    `omni` is `propagation.data.spaceweather.fetch_omni2_range`'s output.
+    `horizon_hours` (default 0) shifts only the as-of-now feature builders
+    (space weather, AR history) to prediction_time = window_start -
+    horizon_hours; time/geometry/solar features stay anchored at the target
+    window_start since they're knowable in advance (docs/superpowers/specs/
+    2026-07-24-m3-band-horizon-expansion-design.md sec 2)."""
     out = add_time_features(labels)
     out = add_geometry_features(out)
     out = add_solar_features(out)
-    out = add_spaceweather_features(out, omni)
-    out = add_history_features(full_history, out)
+    out = add_band_feature(out)
+    out = add_spaceweather_features(out, omni, horizon_hours=horizon_hours)
+    out = add_history_features(full_history, out, horizon_hours=horizon_hours)
     return out

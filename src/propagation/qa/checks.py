@@ -138,16 +138,50 @@ def check_lowband_diurnal(labels: pl.DataFrame) -> QAResult:
 
 
 def check_grayline_40m(labels: pl.DataFrame) -> QAResult:
-    """QA check 3: 40m gray-line open-rate peak near the terminator. Needs
-    solar-terminator features (features/solar.py, scheduled for M2) to locate
-    the terminator per path-cell; M0 has no such feature, so this is a real,
-    tested precondition gate, not a stub of the eventual arithmetic."""
+    """QA check 3 (docs/SPEC-labeling.md sec 6): 40m gray-line open-rate
+    local max within +/-1h of the midpoint terminator vs midday, DX paths
+    > 6 Mm. Requires features/solar.py's midpoint_hours_since_terminator
+    and midpoint_solar_zenith already joined onto `labels`; without them
+    this stays a gate (M0/M1 runs have no solar features to check against)."""
+    if "midpoint_hours_since_terminator" not in labels.columns or "midpoint_solar_zenith" not in labels.columns:
+        return QAResult(
+            3, "grayline_40m", "insufficient_data",
+            "terminator-relative timing requires features/solar.py joined onto labels",
+        )
     subset = labels.filter(pl.col("band") == "40m")
     if subset.height == 0:
         return QAResult(3, "grayline_40m", "insufficient_data", "no 40m labels in this run")
+
+    pairs = subset.select(["tx_field", "rx_field"]).unique().to_dicts()
+    dist_by_pair = {}
+    for p in pairs:
+        try:
+            lat1, lon1 = grid_to_latlon(p["tx_field"])
+            lat2, lon2 = grid_to_latlon(p["rx_field"])
+            dist_by_pair[(p["tx_field"], p["rx_field"])] = great_circle_km(lat1, lon1, lat2, lon2)
+        except ValueError:
+            continue
+    working = subset.with_columns(
+        pl.struct(["tx_field", "rx_field"])
+        .map_elements(
+            lambda r: dist_by_pair.get((r["tx_field"], r["rx_field"])), return_dtype=pl.Float64
+        )
+        .alias("distance_km")
+    ).filter(pl.col("distance_km") > 6000)
+    if working.height == 0:
+        return QAResult(3, "grayline_40m", "insufficient_data", "no >6Mm 40m paths")
+
+    terminator = working.filter(pl.col("midpoint_hours_since_terminator").abs() <= 1.0)
+    midday = working.filter(pl.col("midpoint_solar_zenith") <= 30.0)
+    if terminator.height == 0 or midday.height == 0:
+        return QAResult(3, "grayline_40m", "insufficient_data", "missing gray-line or midday windows")
+
+    terminator_rate = float(terminator["open"].cast(pl.Float64).mean())
+    midday_rate = float(midday["open"].cast(pl.Float64).mean())
+    status = "pass" if terminator_rate > midday_rate else "fail"
     return QAResult(
-        3, "grayline_40m", "insufficient_data",
-        "terminator-relative timing requires features/solar.py (M2); not computable yet",
+        3, "grayline_40m", status,
+        f"gray-line open-rate={terminator_rate:.2f} vs midday open-rate={midday_rate:.2f}",
     )
 
 
@@ -216,31 +250,105 @@ def check_reciprocity(labels: pl.DataFrame) -> QAResult:
 
 
 def check_solar_cycle(labels: pl.DataFrame, min_months: int = 12) -> QAResult:
-    """QA check 6: monthly 10m DX open-rate vs F10.7 correlation > 0.5 over
-    multi-year history. SPEC explicitly sanctions 'insufficient data' here when
-    history is short (docs/SPEC-labeling.md sec 6)."""
+    """QA check 6 (docs/SPEC-labeling.md sec 6): monthly 10m DX (>6 Mm)
+    open-rate vs F10.7 correlation > 0.5 over multi-year history. Requires
+    features/spaceweather.py's f107_daily already joined onto `labels`."""
     subset = labels.filter(pl.col("band") == "10m")
     if subset.height == 0:
         return QAResult(6, "solar_cycle", "insufficient_data", "no 10m labels in this run")
+
+    pairs = subset.select(["tx_field", "rx_field"]).unique().to_dicts()
+    dist_by_pair = {}
+    for p in pairs:
+        try:
+            lat1, lon1 = grid_to_latlon(p["tx_field"])
+            lat2, lon2 = grid_to_latlon(p["rx_field"])
+            dist_by_pair[(p["tx_field"], p["rx_field"])] = great_circle_km(lat1, lon1, lat2, lon2)
+        except ValueError:
+            continue
+    subset = subset.with_columns(
+        pl.struct(["tx_field", "rx_field"])
+        .map_elements(
+            lambda r: dist_by_pair.get((r["tx_field"], r["rx_field"])), return_dtype=pl.Float64
+        )
+        .alias("distance_km")
+    ).filter(pl.col("distance_km") > 6000)
+    if subset.height == 0:
+        return QAResult(6, "solar_cycle", "insufficient_data", "no DX (>6Mm) 10m paths")
+
     n_months = subset.select(pl.col("window_start").dt.truncate("1mo")).unique().height
     if n_months < min_months:
         return QAResult(
             6, "solar_cycle", "insufficient_data",
-            f"only {n_months} distinct month(s); need >= {min_months} plus F10.7 series (M3)",
+            f"only {n_months} distinct month(s); need >= {min_months}",
         )
-    return QAResult(6, "solar_cycle", "insufficient_data", "F10.7 correlation lands with M3 space-weather features")
+    if "f107_daily" not in subset.columns:
+        return QAResult(
+            6, "solar_cycle", "insufficient_data",
+            "F10.7 series requires features/spaceweather.py joined onto labels",
+        )
+
+    monthly = subset.with_columns(
+        pl.col("window_start").dt.truncate("1mo").alias("month")
+    ).group_by("month").agg(
+        pl.col("open").cast(pl.Float64).mean().alias("open_rate"),
+        pl.col("f107_daily").mean().alias("f107_mean"),
+    )
+    r = float(np.corrcoef(monthly["open_rate"].to_numpy(), monthly["f107_mean"].to_numpy())[0, 1])
+    status = "pass" if r > 0.5 else "fail"
+    return QAResult(6, "solar_cycle", status, f"monthly open-rate/F10.7 pearson r={r:.3f}")
 
 
 def check_storm_response(labels: pl.DataFrame, kp_max: float | None) -> QAResult:
-    """QA check 7: Kp>=6 trans-polar open-rate <= 50% of Kp<=2 matched baseline.
-    Needs a Kp series (space_weather features, M2) and requires at least one
-    storm (Kp>=5) fold in the eval window."""
+    """QA check 7 (docs/SPEC-labeling.md sec 6): Kp>=6 trans-polar paths
+    (|midpoint geomag lat| > 60 deg) open-rate <= 50% of Kp<=2 matched
+    (band, hour, month) baseline. Requires features/spaceweather.py's
+    kp_now and features/geometry.py's midpoint_geomag_lat already joined
+    onto `labels`."""
     if kp_max is None or kp_max < 5.0:
         return QAResult(
             7, "storm_response", "insufficient_data",
             f"no Kp>=5 fold in this run (max Kp available={kp_max})",
         )
-    return QAResult(7, "storm_response", "insufficient_data", "Kp series not yet joined (features/spaceweather.py, M2)")
+    if "kp_now" not in labels.columns or "midpoint_geomag_lat" not in labels.columns:
+        return QAResult(
+            7, "storm_response", "insufficient_data",
+            "space-weather/geometry features not joined onto labels",
+        )
+
+    trans_polar = labels.filter(pl.col("midpoint_geomag_lat").abs() > 60.0)
+    if trans_polar.height == 0:
+        return QAResult(7, "storm_response", "insufficient_data", "no trans-polar (|geomag lat|>60) paths")
+
+    bucketed = trans_polar.with_columns(
+        pl.col("window_start").dt.hour().alias("hour"),
+        pl.col("window_start").dt.month().alias("month"),
+    )
+    storm = bucketed.filter(pl.col("kp_now") >= 6.0)
+    quiet = bucketed.filter(pl.col("kp_now") <= 2.0)
+    if storm.height == 0 or quiet.height == 0:
+        return QAResult(
+            7, "storm_response", "insufficient_data", "no storm or quiet Kp rows among trans-polar paths"
+        )
+
+    storm_rates = storm.group_by(["band", "hour", "month"]).agg(
+        pl.col("open").cast(pl.Float64).mean().alias("storm_rate")
+    )
+    quiet_rates = quiet.group_by(["band", "hour", "month"]).agg(
+        pl.col("open").cast(pl.Float64).mean().alias("quiet_rate")
+    )
+    matched = storm_rates.join(quiet_rates, on=["band", "hour", "month"], how="inner").filter(
+        pl.col("quiet_rate") > 0
+    )
+    if matched.height == 0:
+        return QAResult(
+            7, "storm_response", "insufficient_data",
+            "no matched (band,hour,month) buckets with both regimes",
+        )
+
+    ratio = float((matched["storm_rate"] / matched["quiet_rate"]).mean())
+    status = "pass" if ratio <= 0.5 else "fail"
+    return QAResult(7, "storm_response", status, f"mean matched-bucket storm/quiet open-rate ratio={ratio:.3f}")
 
 
 def check_volume_hygiene(
