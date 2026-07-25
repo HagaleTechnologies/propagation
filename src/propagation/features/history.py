@@ -230,7 +230,22 @@ def _relation_via_expanded_anchors(
     return _finalize_snr(combined.rename({orig_col: varying_col}), prefix)
 
 
-def add_history_features(full_history: pl.DataFrame, target_rows: pl.DataFrame) -> pl.DataFrame:
+def add_history_features(
+    full_history: pl.DataFrame, target_rows: pl.DataFrame, horizon_hours: float = 0.0
+) -> pl.DataFrame:
+    """`horizon_hours=0` (default) reproduces M2's original as-of-
+    window_start behavior exactly. For horizon_hours > 0, every AR rolling
+    window re-anchors at prediction_time = window_start - horizon_hours by
+    temporarily overwriting `target_rows.window_start` with prediction_time
+    before running the (otherwise unchanged) relation logic below, then
+    restoring the real window_start on the output before returning -- this
+    keeps `history_narrow` (the real spot-activity timestamps being rolled
+    over) untouched while only the target anchor's own timestamp shifts,
+    matching docs/SPEC-labeling.md's "horizon is a training-time join
+    offset" framing."""
+    shift = pl.duration(hours=horizon_hours)
+    target_rows = target_rows.with_columns((pl.col("window_start") - shift).alias("window_start"))
+
     if full_history.height == 0:
         full_history = pl.DataFrame(
             schema={"window_start": pl.Datetime("us", "UTC"), "tx_field": pl.Utf8, "rx_field": pl.Utf8,
@@ -323,4 +338,4 @@ def add_history_features(full_history: pl.DataFrame, target_rows: pl.DataFrame) 
     )
     out = out.join(yesterday_src, on=["window_start", "tx_field", "rx_field", "band"], how="left")
 
-    return out
+    return out.with_columns((pl.col("window_start") + shift).alias("window_start"))
