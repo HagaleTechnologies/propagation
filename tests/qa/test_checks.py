@@ -215,6 +215,46 @@ def test_check6_gate_insufficient_data_single_month():
     assert result.status == "insufficient_data"
 
 
+def _storm_row(hour, month, kp, open_, geomag_lat=75.0):
+    return {
+        "window_start": dt.datetime(2026, month, 1, hour, 0, tzinfo=dt.timezone.utc),
+        "tx_field": "FN", "rx_field": "DM", "band": "20m", "open": open_,
+        "kp_now": kp, "midpoint_geomag_lat": geomag_lat,
+    }
+
+
+def test_check7_storm_response_real_computation_pass():
+    # Same (band=20m, hour=12, month=6) bucket in both regimes: storm
+    # open-rate 1/10, quiet open-rate 8/10 -> ratio 0.125 <= 0.5.
+    rows = (
+        [_storm_row(12, 6, kp=7.0, open_=0) for _ in range(9)]
+        + [_storm_row(12, 6, kp=7.0, open_=1)]
+        + [_storm_row(12, 6, kp=1.0, open_=1) for _ in range(8)]
+        + [_storm_row(12, 6, kp=1.0, open_=0) for _ in range(2)]
+    )
+    result = check_storm_response(_df(rows), kp_max=7.0)
+    assert result.status == "pass"
+
+
+def test_check7_storm_response_real_computation_fail():
+    # storm open-rate 9/10, quiet open-rate 8/10 -> ratio 1.125 > 0.5.
+    rows = (
+        [_storm_row(12, 6, kp=7.0, open_=1) for _ in range(9)]
+        + [_storm_row(12, 6, kp=7.0, open_=0)]
+        + [_storm_row(12, 6, kp=1.0, open_=1) for _ in range(8)]
+        + [_storm_row(12, 6, kp=1.0, open_=0) for _ in range(2)]
+    )
+    result = check_storm_response(_df(rows), kp_max=7.0)
+    assert result.status == "fail"
+
+
+def test_check7_insufficient_data_without_spaceweather_columns():
+    # kp_max clears the >=5 gate, but the frame still lacks kp_now/
+    # midpoint_geomag_lat -- must still gate, not crash.
+    result = check_storm_response(_df([_row(14, "FN", "DM", "20m", 1)]), kp_max=6.0)
+    assert result.status == "insufficient_data"
+
+
 def test_check7_gate_insufficient_data_without_storm_fold():
     result = check_storm_response(_df([_row(14, "FN", "DM", "20m", 1)]), kp_max=3.0)
     assert result.status == "insufficient_data"

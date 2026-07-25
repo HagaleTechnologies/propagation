@@ -300,15 +300,55 @@ def check_solar_cycle(labels: pl.DataFrame, min_months: int = 12) -> QAResult:
 
 
 def check_storm_response(labels: pl.DataFrame, kp_max: float | None) -> QAResult:
-    """QA check 7: Kp>=6 trans-polar open-rate <= 50% of Kp<=2 matched baseline.
-    Needs a Kp series (space_weather features, M2) and requires at least one
-    storm (Kp>=5) fold in the eval window."""
+    """QA check 7 (docs/SPEC-labeling.md sec 6): Kp>=6 trans-polar paths
+    (|midpoint geomag lat| > 60 deg) open-rate <= 50% of Kp<=2 matched
+    (band, hour, month) baseline. Requires features/spaceweather.py's
+    kp_now and features/geometry.py's midpoint_geomag_lat already joined
+    onto `labels`."""
     if kp_max is None or kp_max < 5.0:
         return QAResult(
             7, "storm_response", "insufficient_data",
             f"no Kp>=5 fold in this run (max Kp available={kp_max})",
         )
-    return QAResult(7, "storm_response", "insufficient_data", "Kp series not yet joined (features/spaceweather.py, M2)")
+    if "kp_now" not in labels.columns or "midpoint_geomag_lat" not in labels.columns:
+        return QAResult(
+            7, "storm_response", "insufficient_data",
+            "space-weather/geometry features not joined onto labels",
+        )
+
+    trans_polar = labels.filter(pl.col("midpoint_geomag_lat").abs() > 60.0)
+    if trans_polar.height == 0:
+        return QAResult(7, "storm_response", "insufficient_data", "no trans-polar (|geomag lat|>60) paths")
+
+    bucketed = trans_polar.with_columns(
+        pl.col("window_start").dt.hour().alias("hour"),
+        pl.col("window_start").dt.month().alias("month"),
+    )
+    storm = bucketed.filter(pl.col("kp_now") >= 6.0)
+    quiet = bucketed.filter(pl.col("kp_now") <= 2.0)
+    if storm.height == 0 or quiet.height == 0:
+        return QAResult(
+            7, "storm_response", "insufficient_data", "no storm or quiet Kp rows among trans-polar paths"
+        )
+
+    storm_rates = storm.group_by(["band", "hour", "month"]).agg(
+        pl.col("open").cast(pl.Float64).mean().alias("storm_rate")
+    )
+    quiet_rates = quiet.group_by(["band", "hour", "month"]).agg(
+        pl.col("open").cast(pl.Float64).mean().alias("quiet_rate")
+    )
+    matched = storm_rates.join(quiet_rates, on=["band", "hour", "month"], how="inner").filter(
+        pl.col("quiet_rate") > 0
+    )
+    if matched.height == 0:
+        return QAResult(
+            7, "storm_response", "insufficient_data",
+            "no matched (band,hour,month) buckets with both regimes",
+        )
+
+    ratio = float((matched["storm_rate"] / matched["quiet_rate"]).mean())
+    status = "pass" if ratio <= 0.5 else "fail"
+    return QAResult(7, "storm_response", status, f"mean matched-bucket storm/quiet open-rate ratio={ratio:.3f}")
 
 
 def check_volume_hygiene(
