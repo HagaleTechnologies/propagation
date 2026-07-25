@@ -173,6 +173,43 @@ def test_check5_reciprocity():
     assert result.status in {"pass", "insufficient_data"}
 
 
+def _solar_cycle_row(month_idx, f107, open_):
+    # Create one row per month, with proper calendar month progression
+    # month_idx 0 -> Jan 2026, 1 -> Feb 2026, etc.
+    year = 2026 + (month_idx // 12)
+    month = (month_idx % 12) + 1
+    return {
+        "window_start": dt.datetime(year, month, 1, tzinfo=dt.timezone.utc),
+        "tx_field": "FN", "rx_field": "PM", "band": "10m", "open": open_,
+        "f107_daily": f107,
+    }
+
+
+def test_check6_solar_cycle_real_computation_pass():
+    # 12 months, f107 rising linearly; monthly open-rate rises in lockstep
+    # (m/11 out of 11 rows/month) -- near-perfect positive correlation.
+    rows = []
+    for m in range(12):
+        f107 = 70.0 + m * 10.0
+        n_open = m
+        rows += [_solar_cycle_row(m, f107, open_=1) for _ in range(n_open)]
+        rows += [_solar_cycle_row(m, f107, open_=0) for _ in range(11 - n_open)]
+    result = check_solar_cycle(_df(rows))
+    assert result.status == "pass"
+
+
+def test_check6_solar_cycle_real_computation_fail():
+    # Same f107 ramp, but open-rate is ANTI-correlated with it.
+    rows = []
+    for m in range(12):
+        f107 = 70.0 + m * 10.0
+        n_open = 11 - m
+        rows += [_solar_cycle_row(m, f107, open_=1) for _ in range(n_open)]
+        rows += [_solar_cycle_row(m, f107, open_=0) for _ in range(11 - n_open)]
+    result = check_solar_cycle(_df(rows))
+    assert result.status == "fail"
+
+
 def test_check6_gate_insufficient_data_single_month():
     result = check_solar_cycle(_df([_row(14, "FN", "DM", "10m", 1)]))
     assert result.status == "insufficient_data"

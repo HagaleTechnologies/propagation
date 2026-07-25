@@ -250,19 +250,53 @@ def check_reciprocity(labels: pl.DataFrame) -> QAResult:
 
 
 def check_solar_cycle(labels: pl.DataFrame, min_months: int = 12) -> QAResult:
-    """QA check 6: monthly 10m DX open-rate vs F10.7 correlation > 0.5 over
-    multi-year history. SPEC explicitly sanctions 'insufficient data' here when
-    history is short (docs/SPEC-labeling.md sec 6)."""
+    """QA check 6 (docs/SPEC-labeling.md sec 6): monthly 10m DX (>6 Mm)
+    open-rate vs F10.7 correlation > 0.5 over multi-year history. Requires
+    features/spaceweather.py's f107_daily already joined onto `labels`."""
     subset = labels.filter(pl.col("band") == "10m")
     if subset.height == 0:
         return QAResult(6, "solar_cycle", "insufficient_data", "no 10m labels in this run")
+
+    pairs = subset.select(["tx_field", "rx_field"]).unique().to_dicts()
+    dist_by_pair = {}
+    for p in pairs:
+        try:
+            lat1, lon1 = grid_to_latlon(p["tx_field"])
+            lat2, lon2 = grid_to_latlon(p["rx_field"])
+            dist_by_pair[(p["tx_field"], p["rx_field"])] = great_circle_km(lat1, lon1, lat2, lon2)
+        except ValueError:
+            continue
+    subset = subset.with_columns(
+        pl.struct(["tx_field", "rx_field"])
+        .map_elements(
+            lambda r: dist_by_pair.get((r["tx_field"], r["rx_field"])), return_dtype=pl.Float64
+        )
+        .alias("distance_km")
+    ).filter(pl.col("distance_km") > 6000)
+    if subset.height == 0:
+        return QAResult(6, "solar_cycle", "insufficient_data", "no DX (>6Mm) 10m paths")
+
     n_months = subset.select(pl.col("window_start").dt.truncate("1mo")).unique().height
     if n_months < min_months:
         return QAResult(
             6, "solar_cycle", "insufficient_data",
-            f"only {n_months} distinct month(s); need >= {min_months} plus F10.7 series (M3)",
+            f"only {n_months} distinct month(s); need >= {min_months}",
         )
-    return QAResult(6, "solar_cycle", "insufficient_data", "F10.7 correlation lands with M3 space-weather features")
+    if "f107_daily" not in subset.columns:
+        return QAResult(
+            6, "solar_cycle", "insufficient_data",
+            "F10.7 series requires features/spaceweather.py joined onto labels",
+        )
+
+    monthly = subset.with_columns(
+        pl.col("window_start").dt.truncate("1mo").alias("month")
+    ).group_by("month").agg(
+        pl.col("open").cast(pl.Float64).mean().alias("open_rate"),
+        pl.col("f107_daily").mean().alias("f107_mean"),
+    )
+    r = float(np.corrcoef(monthly["open_rate"].to_numpy(), monthly["f107_mean"].to_numpy())[0, 1])
+    status = "pass" if r > 0.5 else "fail"
+    return QAResult(6, "solar_cycle", status, f"monthly open-rate/F10.7 pearson r={r:.3f}")
 
 
 def check_storm_response(labels: pl.DataFrame, kp_max: float | None) -> QAResult:
