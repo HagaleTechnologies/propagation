@@ -242,7 +242,20 @@ def add_history_features(
     keeps `history_narrow` (the real spot-activity timestamps being rolled
     over) untouched while only the target anchor's own timestamp shifts,
     matching docs/SPEC-labeling.md's "horizon is a training-time join
-    offset" framing."""
+    offset" framing.
+
+    Known tradeoff (uniform shift applies to same_hour_yesterday_open too):
+    for horizon_hours > 0, this point-lookup resolves to
+    window_start - horizon_hours - 24h, not window_start - 24h -- so for
+    h>0 it's no longer literally "same hour, one day prior" (e.g. at h=6h
+    it's 30h back, a different hour of day). Still leakage-safe (always
+    strictly before prediction_time); the true window_start - 24h value
+    would also be leakage-safe for every horizon in ROADMAP.md's set
+    (<=24h) and is arguably more predictive, but isn't what this uniform
+    shift computes. Left as-is deliberately (2026-07-24 M3 band/horizon
+    expansion design decision) for consistency with every other AR feature
+    in this function; revisit if the deferred full-scale production sweep
+    shows this costing real headline accuracy at h>0."""
     shift = pl.duration(hours=horizon_hours)
     target_rows = target_rows.with_columns((pl.col("window_start") - shift).alias("window_start"))
 
