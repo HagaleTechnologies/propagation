@@ -160,6 +160,18 @@ def main() -> None:
     omni = fetch_omni2_range(all_years[0], all_years[-1], cache_dir=cache_dir)
     eval_month_keys = list(args.eval_months)
 
+    # P533Model's (path, band, month, hour, SSN) key doesn't depend on
+    # horizon_hours at all (window_start/tx_field/rx_field/band are
+    # horizon-invariant per build_feature_matrix's design -- only the
+    # as-of-now feature builders re-anchor). One instance, reused and
+    # disk-cached across every horizon in this sweep, so P.533's per-row
+    # subprocess cost is paid once per unique key instead of once per
+    # (key, horizon) pair.
+    p533_model = P533Model(
+        ssn_by_month=ssn_by_month(eval_month_keys, cache_dir),
+        cache_path=cache_dir / "p533_scores.parquet",
+    )
+
     out_dir = args.data_dir / "reports" / "m3"
     for horizon_hours in args.horizons:
         train_matrix = build_feature_matrix(
@@ -171,7 +183,7 @@ def main() -> None:
 
         models = {
             "climatology": ClimatologyModel().fit(train_labels),
-            "p533": P533Model(ssn_by_month=ssn_by_month(eval_month_keys, cache_dir)),
+            "p533": p533_model,
             "gbt": GBTModel().fit(train_matrix),
         }
         results = write_band_group_reports(models, eval_matrix, horizon_hours, out_dir)
