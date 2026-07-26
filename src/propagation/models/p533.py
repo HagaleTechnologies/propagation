@@ -224,6 +224,33 @@ def ssn_by_month(months: list[str], cache_dir: Path) -> dict[str, float]:
     return out
 
 
+_CACHE_SCHEMA = {
+    "tx_field": pl.Utf8, "rx_field": pl.Utf8, "band": pl.Utf8,
+    "month": pl.Int64, "hour": pl.Int64, "ssn_round": pl.Int64,
+    "p_open": pl.Float64,
+}
+
+
+def _load_p533_cache(cache_path: Path) -> dict[tuple, float | None]:
+    if not cache_path.exists():
+        return {}
+    df = pl.read_parquet(cache_path)
+    return {
+        (r["tx_field"], r["rx_field"], r["band"], r["month"], r["hour"], r["ssn_round"]): r["p_open"]
+        for r in df.iter_rows(named=True)
+    }
+
+
+def _save_p533_cache(cache_path: Path, memo: dict[tuple, float | None]) -> None:
+    cache_path.parent.mkdir(parents=True, exist_ok=True)
+    rows = [
+        {"tx_field": k[0], "rx_field": k[1], "band": k[2], "month": k[3], "hour": k[4],
+         "ssn_round": k[5], "p_open": v}
+        for k, v in memo.items()
+    ]
+    pl.DataFrame(rows, schema=_CACHE_SCHEMA).write_parquet(cache_path)
+
+
 class P533Model:
     """Predictor over ITURHFProp: field-center -> field-center,
     p_open = BCR/100. Deterministic per (path, band, month, hour, SSN), so
@@ -237,11 +264,27 @@ class P533Model:
     binary, and real WSPRnet-scale eval sets carry hundreds of thousands of
     unique keys per month, so a serial loop is a many-hour bottleneck.
     subprocess.run releases the GIL while the child runs, so threads (not
-    processes) already parallelize the wall-clock-dominant part."""
+    processes) already parallelize the wall-clock-dominant part.
 
-    def __init__(self, ssn_by_month: dict[str, float], max_workers: int | None = None):
+    `cache_path`, if given, persists the key->p_open memo (including
+    engine-failure abstains, since those are just as deterministic per key)
+    to a parquet file on disk, loaded at construction and rewritten after
+    any new keys are computed. This lets a later `P533Model` instance --
+    another horizon in the same eval_m3.py sweep, or a rerun in a later
+    session -- reuse scores instead of re-invoking the subprocess for keys
+    already seen. Single-writer only: concurrent processes sharing the same
+    cache_path will race on the final write, so don't point two parallel
+    eval runs at the same cache file."""
+
+    def __init__(
+        self, ssn_by_month: dict[str, float], max_workers: int | None = None,
+        cache_path: Path | None = None,
+    ):
         self._ssn = ssn_by_month          # "YYYY-MM" -> SSN
-        self._memo: dict[tuple, float | None] = {}
+        self._cache_path = cache_path
+        self._memo: dict[tuple, float | None] = (
+            _load_p533_cache(cache_path) if cache_path else {}
+        )
         self._max_workers = max_workers or os.cpu_count() or 8
 
     def _resolve_key(self, tx_field: str, rx_field: str, band: str,
@@ -288,6 +331,8 @@ class P533Model:
                 for fut in as_completed(futures):
                     key, value = fut.result()
                     self._memo[key] = value
+            if self._cache_path is not None:
+                _save_p533_cache(self._cache_path, self._memo)
 
         p = [self._memo[key] if key is not None else None for key in row_keys]
         return labels.with_columns(pl.Series("p_open", p, dtype=pl.Float64))

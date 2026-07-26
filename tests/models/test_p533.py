@@ -253,3 +253,68 @@ def test_predict_fans_unique_keys_across_thread_pool(monkeypatch):
     out = model.predict(cells)
     assert len(calls) == 20  # 100 rows, 20 unique hours -> 20 calls, not 100
     assert out["p_open"].to_list() == [float(row[0].hour) / 100.0 for row in rows]
+
+
+def test_predict_reuses_disk_cache_across_model_instances(monkeypatch, tmp_path):
+    # M3's multi-horizon sweep re-instantiates P533Model per horizon on keys
+    # that don't depend on horizon_hours at all (path/band/month/hour/SSN) --
+    # a disk cache lets a fresh instance skip the subprocess entirely for
+    # keys a prior instance (or prior script run) already computed.
+    calls = []
+
+    def fake_score(tx_lat, tx_lon, rx_lat, rx_lon, band, month, hour, ssn):
+        calls.append((band, month, hour))
+        return P533Result(reliability_pct=80.0, snr_db=10.0)
+
+    monkeypatch.setattr(p533, "p533_score", fake_score)
+    cache_path = tmp_path / "p533_scores.parquet"
+    ts = datetime(2026, 6, 15, 14, 0, tzinfo=timezone.utc)
+    cells = _cells([(ts, "EM", "PM", "20m")])
+
+    model1 = P533Model(ssn_by_month={"2026-06": 120.0}, cache_path=cache_path)
+    out1 = model1.predict(cells)
+    assert out1["p_open"].to_list() == [0.8]
+    assert len(calls) == 1
+
+    model2 = P533Model(ssn_by_month={"2026-06": 120.0}, cache_path=cache_path)
+    out2 = model2.predict(cells)
+    assert out2["p_open"].to_list() == [0.8]
+    assert len(calls) == 1  # cache hit -- no new subprocess call
+
+
+def test_predict_caches_abstains_on_disk_too(monkeypatch, tmp_path):
+    # An engine failure (e.g. a band outside P.533's HF range) is
+    # deterministic for a given key -- cache the abstain too, so a fresh
+    # instance doesn't retry a call that will fail the same way again.
+    calls = []
+
+    def boom(*a, **k):
+        calls.append(1)
+        raise RuntimeError("iturhfprop exit 1: ...")
+
+    monkeypatch.setattr(p533, "p533_score", boom)
+    cache_path = tmp_path / "p533_scores.parquet"
+    ts = datetime(2026, 6, 1, 0, 0, tzinfo=timezone.utc)
+    cells = _cells([(ts, "EM", "PM", "20m")])
+
+    model1 = P533Model(ssn_by_month={"2026-06": 120.0}, cache_path=cache_path)
+    out1 = model1.predict(cells)
+    assert out1["p_open"].to_list() == [None]
+    assert len(calls) == 1
+
+    model2 = P533Model(ssn_by_month={"2026-06": 120.0}, cache_path=cache_path)
+    out2 = model2.predict(cells)
+    assert out2["p_open"].to_list() == [None]
+    assert len(calls) == 1  # cached abstain -- no retry
+
+
+def test_predict_without_cache_path_does_not_touch_disk(monkeypatch, tmp_path):
+    monkeypatch.setattr(
+        p533, "p533_score",
+        lambda *a, **k: P533Result(reliability_pct=80.0, snr_db=10.0),
+    )
+    model = P533Model(ssn_by_month={"2026-06": 120.0})
+    ts = datetime(2026, 6, 15, 14, 0, tzinfo=timezone.utc)
+    cells = _cells([(ts, "EM", "PM", "20m")])
+    model.predict(cells)
+    assert list(tmp_path.iterdir()) == []
