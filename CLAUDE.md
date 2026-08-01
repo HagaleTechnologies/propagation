@@ -18,9 +18,13 @@ audited, `GBTModel` (LightGBM + isotonic calibration), `scripts/eval_m2.py`.
 The live acceptance run (ROADMAP.md's pass/fail gate) confirms GBT beats
 both climatology and P.533 on Brier/log-loss at h=0 on 20m+10m across 3
 held-out 2024 months incl. the Gannon storm — see
-`docs/DECISIONS/0005-m2-acceptance-result.md` for headline numbers. M3
-(scale to all bands/horizons, RBN + live PSKReporter, storm case studies)
-is next.
+`docs/DECISIONS/0005-m2-acceptance-result.md` for headline numbers.
+**M3 minimum credible result cleared** (capability merged PR #30, P.533
+disk-cache PR #32): GBT beats both baselines at h=0 and +3h on all three
+required bands (20m/15m/10m) across the same 3 held-out months — see
+`docs/DECISIONS/0006-m3-minimum-credible-result.md`. Still open for the
+full M3 milestone: RBN extractor, live PSKReporter accumulator, cqdx R2
+backfill, storm-window case studies, TAPR/DCC writeup outline.
 
 ## Documents (read in this order)
 
