@@ -1,0 +1,46 @@
+{
+  "catalyst": {
+    "projectKey": "HagaleTechnologies",
+    "repository": {
+      "org": "HagaleTechnologies",
+      "name": "propagation"
+    },
+    "project": {
+      "ticketPrefix": "PRO",
+      "name": "propagation"
+    },
+    "linear": {
+      "teamKey": "PRO",
+      "stateMap": {
+        "backlog": "Backlog",
+        "todo": "Todo",
+        "research": "In Progress",
+        "planning": "In Progress",
+        "inProgress": "In Progress",
+        "inReview": "In Review",
+        "done": "Done",
+        "canceled": "Canceled"
+      },
+      "teamId": "10494fd1-f2b0-4bca-9c66-cd0935b7a162"
+    },
+    "thoughts": {
+      "user": null,
+      "directory": "propagation",
+      "profile": "HagaleTechnologies"
+    },
+    "sweep": {
+      "idleHours": 48,
+      "intervalHours": 1,
+      "salvagePush": false,
+      "maxRemovalsPerRun": 10
+    },
+    "executionCore": {
+      "maxParallel": 3,
+      "minParallel": 1,
+      "maxParallelCeiling": 3
+    },
+    "orchestration": {
+      "executor": "codex-exec"
+    }
+  }
+}
