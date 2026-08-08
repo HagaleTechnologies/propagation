@@ -87,3 +87,13 @@ in other clones, branches, or worktrees.
 - **Flush at the end:** push (`--force-with-lease` only) and open/update your
   PR before finishing. Unpushed work is invisible work.
 - **Main moves only by PR merge.**
+
+
+## Code review convergence
+
+Every review round fixes P1 findings inline. From round 2 onward, P2-and-
+lower findings are not fixed inline — they're captured verbatim into a
+follow-up ticket instead, so the PR converges instead of chasing
+progressively finer findings across rounds. Round 1 is unrestricted (fix
+everything reasonable). Full policy:
+docs/DECISIONS/2026-08-07-pr-review-convergence-policy.md.
