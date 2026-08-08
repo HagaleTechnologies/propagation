@@ -15,3 +15,4 @@
 - [What will bite you about implementing from a plan drafted before its dependencies merged?](pages/gotcha-plan-drift-before-merge.md) — A single PR (#10) once drafted implementation plans for M1 through M4, all
 - [What will bite you about the QA diurnal-ratio checks (1 and 2)?](pages/gotcha-qa-diurnal-checks.md) — QA checks 1 (20m day/night open-rate ratio > 2) and 2 (160m/80m night/day
 - [What contract does this repo expose for HF band-opening predictions?](pages/interface-prediction-surface.md) — This repo PRODUCES the `propagation.prediction-surface.v1` contract — a
+- [What's the PR review convergence policy?](../docs/DECISIONS/2026-08-07-pr-review-convergence-policy.md) — P1 findings get fixed every review round; P2-and-lower findings raised after round one are tracked in a follow-up ticket instead of chased inline, so PRs converge instead of oscillating.
