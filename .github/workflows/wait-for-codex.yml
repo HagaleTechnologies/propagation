@@ -75,7 +75,18 @@ concurrency:
   # empty-suffixed group, so cancel-in-progress could cancel one queue
   # entry's required check the moment another one started (Codex P2,
   # flagged reviewing this file after the merge_group job was added).
-  group: wait-for-codex-${{ github.event.pull_request.number || github.event.merge_group.head_sha }}
+  #
+  # github.event_name is also part of the group (not just the PR number):
+  # during the phase-1/phase-2 transitional window (and permanently, for
+  # any PR opened while base declares both pull_request and
+  # pull_request_target), a single PR action fires TWO separate workflow
+  # runs — one per trigger — for the SAME PR. Without this qualifier both
+  # runs shared one group, so cancel-in-progress could cancel whichever run
+  # was about to publish the required "Wait for Codex Review" check on the
+  # PR revision, leaving it permanently cancelled instead of green (Codex
+  # P1, flagged reviewing this file during the pull_request_target
+  # rollout).
+  group: wait-for-codex-${{ github.event_name }}-${{ github.event.pull_request.number || github.event.merge_group.head_sha }}
   cancel-in-progress: true
 
 jobs:
