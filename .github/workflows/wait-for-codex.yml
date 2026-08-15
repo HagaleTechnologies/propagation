@@ -1,27 +1,23 @@
 name: Wait for Codex
 
-# TRANSITIONAL DUAL-TRIGGER STATE (phase 1/2) — pull_request_target is added
-# below ALONGSIDE the existing pull_request, not as a replacement, yet.
-# A same-repo PR editing this file could otherwise, under plain
-# pull_request, run its OWN modified copy with CODEX_REVIEW_PAT still in
-# scope — able to exfiltrate the PAT or self-resolve its own review threads
-# before a human ever looks (see HagaleTechnologies/widdershins' history of
-# this fix for the full writeup and HagaleTechnologies/harbor#59/#60). The
-# real fix is pull_request_target, which always reads its definition from
-# the BASE branch, closing that hole. But a single-step swap can never
-# validate itself: this repo's ruleset requires "Wait for Codex Review" to
-# pass before merge, and a PR that changes its OWN trigger from
-# pull_request to pull_request_target matches NEITHER event (the PR's own
-# copy no longer declares pull_request, and pull_request_target has nothing
-# on base to match yet) — so the check never runs and the PR sits
-# permanently blocked (confirmed live on HagaleTechnologies/widdershins
-# PR #135). This phase-1 PR instead ADDS pull_request_target here while
-# KEEPING pull_request, and widens every `if: github.event_name ==
-# 'pull_request'` step condition below to accept either event name, so the
-# job behaves identically under both during the transition. A phase-2
-# follow-up drops pull_request once this merges, at which point
-# pull_request_target alone can validate itself against the same-named
-# check already live on base.
+# pull_request_target, not pull_request, deliberately (phase 2/2 — see
+# HagaleTechnologies/widdershins' history of this fix for the full
+# writeup, and this repo's own phase-1 PR for the transitional-window
+# rollout). A same-repo PR that edits THIS file could otherwise, under
+# pull_request, run its OWN modified workflow definition with
+# CODEX_REVIEW_PAT still in scope — able to exfiltrate the PAT or
+# self-resolve its own Codex review threads before a human ever looks (see
+# HagaleTechnologies/harbor#59/#60). pull_request_target always reads its
+# workflow definition from the BASE branch, never the PR's own copy,
+# closing that hole: a PR's edits to this file only take effect once
+# merged.
+#
+# The other well-known pull_request_target danger — checking out the PR's
+# HEAD ref and running untrusted code from it with secrets in scope — does
+# NOT apply to this job: it never runs actions/checkout at all. Every step
+# below talks to the GitHub API only (`gh api` / `gh api graphql`),
+# reading/writing PR metadata, comments, and review threads — never
+# executing anything from the PR's own tree.
 on:
   # `reopened` included, but routed through the explicit re-review request
   # path below (same as synchronize), not treated as an implicit-review
@@ -36,10 +32,6 @@ on:
   # with no path forward except another push (Codex P2, flagged reviewing
   # THIS file on cqdx#259). Explicitly requesting a review on reopen (like
   # synchronize does) fixes both gaps at once.
-  pull_request:
-    types: [opened, ready_for_review, synchronize, reopened]
-  # Transitional (phase 1/2, see header comment) — same types as pull_request
-  # above, kept in lockstep so phase 2 can drop pull_request cleanly.
   pull_request_target:
     types: [opened, ready_for_review, synchronize, reopened]
   # merge_group: repos using a GitHub merge queue re-evaluate every required
@@ -130,7 +122,7 @@ jobs:
           echo "Merge-group evaluation — the constituent PR already passed a real Wait for Codex Review during its own PR phase; nothing further to review on this synthetic integration commit."
 
       - name: Record run start
-        if: contains(fromJSON('["pull_request","pull_request_target"]'), github.event_name)
+        if: github.event_name == 'pull_request_target'
         env:
           # Seed from the PR event's OWN updated_at (set by GitHub at dispatch
           # time), not a runner-observed "now". A queued or slow-starting
@@ -148,7 +140,7 @@ jobs:
 
       - name: Skip if this run's head no longer matches the PR's current head
         id: head-check
-        if: contains(fromJSON('["pull_request","pull_request_target"]'), github.event_name)
+        if: github.event_name == 'pull_request_target'
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           REPO: ${{ github.repository }}
@@ -179,7 +171,7 @@ jobs:
         # event and, without this, would reconstruct the same stale cutoff
         # and rediscover the identical old error forever rather than asking
         # Codex to look again (Codex P2, flagged reviewing this file).
-        if: contains(fromJSON('["pull_request","pull_request_target"]'), github.event_name) && steps.head-check.outputs.stale != 'true' && (github.event.action == 'synchronize' || github.event.action == 'reopened' || github.run_attempt > 1)
+        if: github.event_name == 'pull_request_target' && steps.head-check.outputs.stale != 'true' && (github.event.action == 'synchronize' || github.event.action == 'reopened' || github.run_attempt > 1)
         env:
           # Codex only auto-reviews on opened/ready_for_review, not on every
           # push (this repo's own AGENTS.md: "not every push. After a
@@ -202,14 +194,16 @@ jobs:
           PR: ${{ github.event.pull_request.number }}
         run: |
           set -o pipefail
-          # GitHub does not expose secrets to a `pull_request`-triggered
-          # workflow run for a fork PR (by design — see GitHub's own docs on
-          # securely using pull_request_target/pull_request with forks), so
-          # CODEX_REVIEW_PAT expands to empty here and every `gh api` call
-          # below would fail auth and crash this step under `bash -e`,
-          # blocking a fork contributor's re-push behind a hard failure
-          # instead of just skipping the re-review request (Codex P1,
-          # flagged reviewing this file).
+          # Under `pull_request_target`, secrets ARE passed even on a
+          # fork-originated PR — that's the whole point of the trigger: the
+          # run always uses the BASE branch's workflow definition, so a fork
+          # PR can never redefine what this step does with the PAT in
+          # scope. This guard is kept anyway as defense-in-depth for the
+          # case CODEX_REVIEW_PAT is simply unset/revoked at the org level,
+          # so every `gh api` call below doesn't fail auth and crash this
+          # step under `bash -e` (Codex P1, flagged reviewing an earlier,
+          # `pull_request`-triggered version of this file, where the same
+          # emptiness could also happen because the PR was from a fork).
           #
           # DELIBERATELY NOT auto-discovering a maintainer's manual `@codex
           # review` comment here: an earlier version of this fix tried that
@@ -230,7 +224,7 @@ jobs:
           # on every HagaleTechnologies ruleset) is the intended way through,
           # not more automation for a rare path.
           if [ -z "$GH_TOKEN" ]; then
-            echo "CODEX_REVIEW_PAT not available (fork PR, or secret unset) — skipping the fresh re-review request. A formal Codex review tied to this head still resolves the check normally; a maintainer can otherwise use the repo's admin bypass."
+            echo "CODEX_REVIEW_PAT not available (secret unset/revoked) — skipping the fresh re-review request. A formal Codex review tied to this head still resolves the check normally; a maintainer can otherwise use the repo's admin bypass."
             exit 0
           fi
 
@@ -333,7 +327,7 @@ jobs:
           echo "$request_comment" | jq -r '.created_at' > /tmp/codex-run-started.txt
 
       - name: Poll for a terminal Codex signal on this revision
-        if: contains(fromJSON('["pull_request","pull_request_target"]'), github.event_name) && steps.head-check.outputs.stale != 'true'
+        if: github.event_name == 'pull_request_target' && steps.head-check.outputs.stale != 'true'
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           # Only for the reply+resolve mutations at the end of this step —
