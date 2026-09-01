@@ -712,11 +712,18 @@ jobs:
                   # below -- meaning nothing previously stopped the label
                   # from applying even though Codex just restated a live
                   # concern. Counted here specifically so the label decision
-                  # (not just the auto-resolve decision) sees it.
+                  # (not just the auto-resolve decision) sees it. Uses
+                  # ($baseline + $baselineInitiated) rather than $baseline
+                  # alone -- a Codex-started thread a human already joined
+                  # before this round drops out of the strict $baseline (its
+                  # purity filter) but stays in $baselineInitiated, and a
+                  # restatement on THAT thread must still count here even
+                  # though it would never be auto-resolved by the
+                  # (deliberately stricter) resolvable computation below.
                   restated_count: ([
                     $nodes[]
                     | select(.isResolved == false)
-                    | select(.id as $id | $baseline | index($id))
+                    | select(.id as $id | (($baseline + $baselineInitiated) | unique) | index($id))
                     | select([.comments.nodes[] | select(.createdAt >= $since and .author.login == "chatgpt-codex-connector")] | length > 0)
                     | .id
                   ] | length),
