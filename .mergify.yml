@@ -22,31 +22,43 @@
 # which must NOT be treated as merge-eligible) and stay plain
 # check-success conditions.
 #
-# Trusted-author gate (`author = thagale` OR `author = dependabot[bot]`):
-# this repo is public, its ruleset has `required_approving_review_count: 0`,
-# and the native auto-merge workflow this queue replaces had NO
-# author-association check of its own to carry forward -- without this
-# condition, any outside contributor's PR that goes green on all three
-# required checks would auto-queue and merge with zero human in the loop.
-# Mergify has no direct equivalent of GitHub's `author_association` (no
-# built-in role/collaborator lookup), only an exact-login match, so
-# `author = thagale` is the closest available primitive. This diverges
-# the moment a second trusted collaborator is added -- their PRs won't
-# auto-queue under a single-login condition and will need either a manual
-# `@Mergifyio queue` comment or this file updated with their login.
+# Trusted-author gate: `thagale` and `dependabot[bot]` are the only two
+# authors that can ever auto-queue -- this repo is public, its ruleset has
+# `required_approving_review_count: 0`, and the native auto-merge workflow
+# this queue replaces had NO author-association check of its own to carry
+# forward -- without this, any outside contributor's PR that goes green on
+# all three required checks would auto-queue and merge with zero human in
+# the loop. Mergify has no direct equivalent of GitHub's
+# `author_association` (no built-in role/collaborator lookup), only an
+# exact-login match, so `author = thagale` is the closest available
+# primitive. This diverges the moment a second trusted human collaborator
+# is added -- their PRs won't auto-queue under a single-login condition and
+# will need either a manual `@Mergifyio queue` comment or a new rule added
+# with their login.
 #
-# `author = dependabot[bot]` is included alongside the human case, not a
-# loophole in it: dependabot-auto-merge.yml's own classify step already
-# vets every Dependabot PR before it can reach this rule at all --
-# breaking/major bumps get labeled "needs-review" and are excluded outright
-# by the `-label = needs-review` condition below, so only already-vetted
-# minor/patch bumps ever reach this author check.
+# The two authors get SEPARATE rules below, not one shared rule, because
+# they need different admission tests. `needs-review` is only ever applied
+# by dependabot-auto-merge.yml (major-version bumps), so the thagale rule
+# carries no needs-review condition at all -- it was never a meaningful
+# gate for a human-authored PR. The dependabot rule instead requires the
+# PRESENCE of a positive `dependabot-vetted` label, applied by
+# dependabot-auto-merge.yml only after it classifies a PR as minor/patch
+# and auto-approves it. The single shared rule this replaced admitted
+# dependabot[bot] on the ABSENCE of `needs-review`, which is satisfied by
+# default before the labeling workflow has even run -- if that workflow is
+# delayed, or fails partway through (before reaching the `needs-review`
+# step, which lives in a LATER, separate step from the metadata fetch), an
+# unvetted major-version Dependabot bump would satisfy `-label =
+# needs-review` and queue having never been reviewed at all. Requiring the
+# positive `dependabot-vetted` label instead means a stalled or failed
+# labeling run simply leaves the PR unqueued -- it fails closed, not open.
 queue_rules:
   - name: default
     merge_method: squash
     batch_size: 1
     update_method: rebase
     merge_conditions:
+      - "#review-threads-unresolved = 0"
       - check-success = Wiki lint
       - check-success = test
       - or:
@@ -57,15 +69,39 @@ queue_rules:
           - check-skipped = Codex review clean (gate before test)
 
 pull_request_rules:
-  - name: queue on green + threads resolved
+  - name: queue on green + threads resolved (thagale)
     conditions:
       - base = main
       - -draft
       - -closed
-      - -label = needs-review
+      - author = thagale
+      - "#review-threads-unresolved = 0"
+      - check-success = Wiki lint
+      - check-success = test
       - or:
-          - author = thagale
-          - author = dependabot[bot]
+          - check-success = Wait for Codex Review
+          - check-skipped = Wait for Codex Review
+      - or:
+          - check-success = Codex review clean (gate before test)
+          - check-skipped = Codex review clean (gate before test)
+    actions:
+      queue:
+        name: default
+
+  # dependabot[bot] gets its OWN rule requiring an explicit positive
+  # `dependabot-vetted` label (applied by dependabot-auto-merge.yml only
+  # for minor/patch updates) rather than sharing the thagale rule's
+  # `-label = needs-review` exclusion -- absence of a negative label is
+  # satisfied by default if the labeling workflow hasn't run yet or fails,
+  # which would let an unvetted major-version bump queue; requiring a
+  # POSITIVE signal fails closed instead.
+  - name: queue on green + threads resolved (dependabot, vetted only)
+    conditions:
+      - base = main
+      - -draft
+      - -closed
+      - author = dependabot[bot]
+      - label = dependabot-vetted
       - "#review-threads-unresolved = 0"
       - check-success = Wiki lint
       - check-success = test

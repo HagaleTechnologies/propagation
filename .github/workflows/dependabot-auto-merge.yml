@@ -28,6 +28,19 @@ jobs:
         run: |
           gh pr review "$PR_URL" --approve --body "Auto-approved: ${UPDATE_TYPE} update for ${DEP_NAMES}"
 
+      # Positive signal, not a negative exclusion: the Mergify queue rule
+      # for dependabot[bot] requires THIS label to be present, rather than
+      # relying on `needs-review`'s absence -- if this workflow is delayed
+      # or fails before reaching this step, the PR simply never gets
+      # vetted and never queues, instead of queueing by default.
+      - name: Mark minor/patch update as vetted for the Mergify queue
+        if: steps.metadata.outputs.update-type != 'version-update:semver-major'
+        env:
+          PR_URL: ${{ github.event.pull_request.html_url }}
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh pr edit "$PR_URL" --add-label "dependabot-vetted"
+
       - name: Label major updates for review
         if: steps.metadata.outputs.update-type == 'version-update:semver-major'
         env:

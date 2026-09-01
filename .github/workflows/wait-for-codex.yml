@@ -705,6 +705,21 @@ jobs:
                         | .id)) as $codex_unresolved
               | {
                   new_count: (($codex_unresolved - $baselineInitiated) | length),
+                  # A baseline thread Codex added a FRESH comment to (rather
+                  # than opening a new thread) is excluded from new_count
+                  # (same thread id, already in $baselineInitiated) but is
+                  # ALSO excluded from resolvable by the freshness filter
+                  # below -- meaning nothing previously stopped the label
+                  # from applying even though Codex just restated a live
+                  # concern. Counted here specifically so the label decision
+                  # (not just the auto-resolve decision) sees it.
+                  restated_count: ([
+                    $nodes[]
+                    | select(.isResolved == false)
+                    | select(.id as $id | $baseline | index($id))
+                    | select([.comments.nodes[] | select(.createdAt >= $since and .author.login == "chatgpt-codex-connector")] | length > 0)
+                    | .id
+                  ] | length),
                   resolvable: [
                     $nodes[]
                     | select(.isResolved == false)
@@ -716,8 +731,9 @@ jobs:
                 }')
 
           new_count=$(echo "$result" | jq '.new_count')
-          if [ "$new_count" -gt 0 ]; then
-            echo "Codex raised $new_count new concern(s) on this revision — leaving all threads as-is for human review."
+          restated_count=$(echo "$result" | jq '.restated_count')
+          if [ "$new_count" -gt 0 ] || [ "$restated_count" -gt 0 ]; then
+            echo "Codex raised $new_count new concern(s) and restated $restated_count existing concern(s) on this revision — leaving all threads as-is for human review."
             exit 0
           fi
 

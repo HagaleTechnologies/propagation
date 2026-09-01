@@ -58,7 +58,7 @@ jobs:
     steps:
       - name: "Bootstrap check: does the base branch's wait-for-codex.yml have the codex-clean label mechanism yet?"
         id: bootstrap-check
-        if: github.event.action == 'synchronize'
+        if: github.event.action == 'synchronize' || github.event.action == 'reopened'
         env:
           GH_TOKEN: ${{ github.token }}
           REPO: ${{ github.repository }}
@@ -94,11 +94,11 @@ jobs:
           fi
 
       - name: Pass through -- not a synchronize event, or bootstrap not yet live on the base branch
-        if: github.event.action != 'synchronize' || steps.bootstrap-check.outputs.bootstrap_status == 'absent'
+        if: (github.event.action != 'synchronize' && github.event.action != 'reopened') || steps.bootstrap-check.outputs.bootstrap_status == 'absent'
         run: echo "Passing through (event action=${{ github.event.action }}, bootstrap_status=${{ steps.bootstrap-check.outputs.bootstrap_status }}) -- no prior round to converge on, or this is the bootstrap PR itself."
 
       - name: Poll for the codex-clean label on this exact revision
-        if: github.event.action == 'synchronize' && steps.bootstrap-check.outputs.bootstrap_status == 'ready'
+        if: (github.event.action == 'synchronize' || github.event.action == 'reopened') && steps.bootstrap-check.outputs.bootstrap_status == 'ready'
         env:
           GH_TOKEN: ${{ github.token }}
           REPO: ${{ github.repository }}
