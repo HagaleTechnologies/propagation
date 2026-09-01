@@ -112,26 +112,6 @@
       "visibility": "private"
     },
     {
-      "hash": "sha256:c552f363658b3c11e5d11ff683f02c4feee6bdbb1c4b90d94360ddb0a6c0237a",
-      "id": "gotcha-auto-merge-workflow",
-      "kind": "gotcha",
-      "links": [
-        "overview"
-      ],
-      "locked": false,
-      "maintainer": "agent",
-      "path": "pages/gotcha-auto-merge-workflow.md",
-      "sources": [
-        ".github/workflows/auto-merge-own-prs.yml",
-        ".github/workflows/ci.yml"
-      ],
-      "status": "current",
-      "title": "What will bite you about this repo's auto-merge-on-open workflow?",
-      "verified_commit": "5431900",
-      "verified_date": "2026-07-19",
-      "visibility": "private"
-    },
-    {
       "hash": "sha256:34c52b67951f4ab169e8c9a6a1df38050f1c10db1f10efc4b9ba5ed7b7243d7d",
       "id": "gotcha-eval-rules",
       "kind": "gotcha",

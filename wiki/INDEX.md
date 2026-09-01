@@ -7,7 +7,6 @@
 - [Why does this repo use monitor-normalized negative sampling?](pages/decision-monitor-normalized-negatives.md) — A spot proves a path was open; the absence of a spot proves almost nothing —
 - [Why is ITURHFProp vendored here rather than calling cqdx's P.533 sidecar?](pages/decision-p533-baseline.md) — The P.533 baseline is implemented by vendoring the ITU's public ITURHFProp C
 - [Why is the prediction surface columnar and integer-quantized?](pages/decision-prediction-contract.md) — The prediction surface contract (v1) uses columnar parallel arrays (not
-- [What will bite you about this repo's auto-merge-on-open workflow?](pages/gotcha-auto-merge-workflow.md) — `.github/workflows/auto-merge-own-prs.yml` enables `gh pr merge --auto
 - [What will bite you about evaluation (blocked CV, full label set)?](pages/gotcha-eval-rules.md) — Three eval rules will produce silently invalid results if violated: (1) random
 - [What will bite you about a leakage audit that only blocklists columns by name?](pages/gotcha-label-leakage-via-nulls.md) — M2's leakage audit (`tests/test_leakage.py`) blocklisted label columns by
 - [What will bite you if you only test against mocked externals/binaries?](pages/gotcha-live-system-bugs.md) — M1 shipped through nine task-level reviews and a whole-branch review with a
