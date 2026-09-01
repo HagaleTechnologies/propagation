@@ -67,6 +67,18 @@ queue_rules:
       - or:
           - check-success = Codex review clean (gate before test)
           - check-skipped = Codex review clean (gate before test)
+      # Both pull_request_rules above feed the SAME queue, so this list
+      # can't unconditionally require `dependabot-vetted` -- that would
+      # also block every thagale-authored PR, which never gets that label.
+      # Scoped to dependabot[bot] specifically: if a queued minor/patch
+      # bump is reclassified to major mid-queue, dependabot-auto-merge.yml
+      # removes the label (see its own major-update step) -- this
+      # condition then stops matching, continuously (not just at entry),
+      # so the reclassified revision can no longer merge even after its
+      # new checks pass.
+      - or:
+          - "-author = dependabot[bot]"
+          - label = dependabot-vetted
 
 pull_request_rules:
   - name: queue on green + threads resolved (thagale)
