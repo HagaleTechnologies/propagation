@@ -136,7 +136,7 @@ jobs:
     # eligibility `if:` above), which is different from "ran and found the
     # round not clean yet" (that produces `failure`). Both `success` and
     # `skipped` mean "proceed."
-    if: needs.codex-clean.result == 'success' || needs.codex-clean.result == 'skipped'
+    if: always() && (needs.codex-clean.result == 'success' || needs.codex-clean.result == 'skipped')
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
