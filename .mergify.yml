@@ -13,11 +13,14 @@
 # The check-success/#review-threads-unresolved conditions below give the
 # rule something stateful to re-trigger on.
 #
-# The check-skipped OR-clauses (on `test` and `Wait for Codex Review`) are
-# needed because wait-for-codex.yml and the codex-clean gate both
-# deliberately skip for dependabot[bot] pushes -- without them, Dependabot
-# PRs would never auto-queue. `Wiki lint` has no such skip (it always runs
-# for every PR) and stays a plain condition.
+# The check-skipped OR-clauses (on `Wait for Codex Review` and `Codex
+# review clean (gate before test)`) are needed because wait-for-codex.yml
+# and the codex-clean gate job both deliberately skip for dependabot[bot]/
+# draft/non-pull_request events -- without them, those PRs would never
+# auto-queue. `test` and `Wiki lint` have no legitimate skip path of their
+# own (test only reports non-success when codex-clean genuinely failed,
+# which must NOT be treated as merge-eligible) and stay plain
+# check-success conditions.
 #
 # Trusted-author gate (`author = thagale` OR `author = dependabot[bot]`):
 # this repo is public, its ruleset has `required_approving_review_count: 0`,
@@ -43,6 +46,15 @@ queue_rules:
     merge_method: squash
     batch_size: 1
     update_method: rebase
+    merge_conditions:
+      - check-success = Wiki lint
+      - check-success = test
+      - or:
+          - check-success = Wait for Codex Review
+          - check-skipped = Wait for Codex Review
+      - or:
+          - check-success = Codex review clean (gate before test)
+          - check-skipped = Codex review clean (gate before test)
 
 pull_request_rules:
   - name: queue on green + threads resolved
@@ -56,12 +68,13 @@ pull_request_rules:
           - author = dependabot[bot]
       - "#review-threads-unresolved = 0"
       - check-success = Wiki lint
-      - or:
-          - check-success = test
-          - check-skipped = test
+      - check-success = test
       - or:
           - check-success = Wait for Codex Review
           - check-skipped = Wait for Codex Review
+      - or:
+          - check-success = Codex review clean (gate before test)
+          - check-skipped = Codex review clean (gate before test)
     actions:
       queue:
         name: default

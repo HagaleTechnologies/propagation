@@ -73,6 +73,7 @@ jobs:
           # the PR introducing apply_clean_label() can't produce a label
           # for its own pushes until it merges). Check CONTENT instead.
           err_file="$(mktemp)"
+          trap 'rm -f "$err_file"' EXIT
           if content=$(gh api "repos/$REPO/contents/.github/workflows/wait-for-codex.yml?ref=$BASE_SHA" -H "Accept: application/vnd.github.raw" 2>"$err_file"); then
             if echo "$content" | grep -q "apply_clean_label"; then
               echo "bootstrap_status=ready" >> "$GITHUB_OUTPUT"

@@ -620,7 +620,7 @@ jobs:
               echo "::error::Codex's initial review left $unresolved unresolved concern(s) open — resolve them, then push a remediation commit to trigger a fresh re-review."
               exit 1
             fi
-            apply_clean_label
+            apply_clean_label || true
             exit 0
           fi
 
@@ -726,7 +726,7 @@ jobs:
           # below whether auto-resolving stale baseline threads is safe.
           # That decision is a DIFFERENT question from "is this SHA clean"
           # and must not gate the label itself.
-          apply_clean_label
+          apply_clean_label || true
 
           echo "$result" | jq -r '.resolvable[]' | while read -r thread_id; do
             [ -z "$thread_id" ] && continue
