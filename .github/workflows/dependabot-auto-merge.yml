@@ -5,6 +5,10 @@ on: pull_request_target
 permissions:
   contents: write
   pull-requests: write
+  # gh label create (in the "Mark minor/patch update as vetted" step
+  # below) needs Issues:write on GitHub's Create-a-label endpoint --
+  # without it the call 403s, hidden by the step's own `|| true`.
+  issues: write
 
 jobs:
   auto-merge:
@@ -28,13 +32,21 @@ jobs:
         run: |
           gh pr review "$PR_URL" --approve --body "Auto-approved: ${UPDATE_TYPE} update for ${DEP_NAMES}"
 
-      - name: Enable auto-merge for minor/patch updates
+      # Positive signal, not a negative exclusion: the Mergify queue rule
+      # for dependabot[bot] requires THIS label to be present, rather than
+      # relying on `needs-review`'s absence -- if this workflow is delayed
+      # or fails before reaching this step, the PR simply never gets
+      # vetted and never queues, instead of queueing by default.
+      - name: Mark minor/patch update as vetted for the Mergify queue
         if: steps.metadata.outputs.update-type != 'version-update:semver-major'
         env:
           PR_URL: ${{ github.event.pull_request.html_url }}
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          gh pr merge "$PR_URL" --auto --squash
+          gh label create "dependabot-vetted" --repo "$GITHUB_REPOSITORY" --color 0e8a16 \
+            --description "Required by .mergify.yml's dependabot queue rule; applied for minor/patch bumps only" \
+            >/dev/null 2>&1 || true
+          gh pr edit "$PR_URL" --add-label "dependabot-vetted"
 
       - name: Label major updates for review
         if: steps.metadata.outputs.update-type == 'version-update:semver-major'
@@ -45,5 +57,20 @@ jobs:
           PREV_VER: ${{ steps.metadata.outputs.previous-version }}
           NEW_VER: ${{ steps.metadata.outputs.new-version }}
         run: |
-          gh pr edit "$PR_URL" --add-label "major-update,needs-review"
+          # A grouped update can be reclassified from minor/patch to major
+          # on a later Dependabot refresh of the SAME PR -- remove any
+          # stale positive vetting signal from an earlier classification,
+          # or the PR could still satisfy Mergify's dependabot rule despite
+          # no longer being minor/patch. Unlike --add-label, gh pr edit
+          # --remove-label on a label that doesn't exist YET on the repo
+          # (e.g. the very first Dependabot PR ever happens to be major, so
+          # the minor/patch step above never ran) errors out -- which,
+          # under GitHub Actions' default `bash -e`, would abort this step
+          # before major-update/needs-review ever gets applied. Create the
+          # label defensively here too (idempotent, same as the minor/patch
+          # step) so it's guaranteed to exist before either path touches it.
+          gh label create "dependabot-vetted" --repo "$GITHUB_REPOSITORY" --color 0e8a16 \
+            --description "Required by .mergify.yml's dependabot queue rule; applied for minor/patch bumps only" \
+            >/dev/null 2>&1 || true
+          gh pr edit "$PR_URL" --add-label "major-update,needs-review" --remove-label "dependabot-vetted"
           gh pr comment "$PR_URL" --body "Major version bump: ${DEP_NAMES} (${PREV_VER} -> ${NEW_VER}). Requires manual review before merge."
