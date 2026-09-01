@@ -39,6 +39,9 @@ jobs:
           PR_URL: ${{ github.event.pull_request.html_url }}
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
+          gh label create "dependabot-vetted" --color 0e8a16 \
+            --description "Required by .mergify.yml's dependabot queue rule; applied for minor/patch bumps only" \
+            >/dev/null 2>&1 || true
           gh pr edit "$PR_URL" --add-label "dependabot-vetted"
 
       - name: Label major updates for review

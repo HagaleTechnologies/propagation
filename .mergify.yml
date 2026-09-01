@@ -90,7 +90,7 @@ pull_request_rules:
 
   # dependabot[bot] gets its OWN rule requiring an explicit positive
   # `dependabot-vetted` label (applied by dependabot-auto-merge.yml only
-  # for minor/patch updates) rather than sharing the thagale rule's
+  # for minor/patch updates) rather than sharing the old shared rule's
   # `-label = needs-review` exclusion -- absence of a negative label is
   # satisfied by default if the labeling workflow hasn't run yet or fails,
   # which would let an unvetted major-version bump queue; requiring a
