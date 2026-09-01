@@ -5,6 +5,10 @@ on: pull_request_target
 permissions:
   contents: write
   pull-requests: write
+  # gh label create (in the "Mark minor/patch update as vetted" step
+  # below) needs Issues:write on GitHub's Create-a-label endpoint --
+  # without it the call 403s, hidden by the step's own `|| true`.
+  issues: write
 
 jobs:
   auto-merge:
@@ -53,5 +57,11 @@ jobs:
           PREV_VER: ${{ steps.metadata.outputs.previous-version }}
           NEW_VER: ${{ steps.metadata.outputs.new-version }}
         run: |
-          gh pr edit "$PR_URL" --add-label "major-update,needs-review"
+          # A grouped update can be reclassified from minor/patch to major
+          # on a later Dependabot refresh of the SAME PR -- remove any
+          # stale positive vetting signal from an earlier classification,
+          # or the PR could still satisfy Mergify's dependabot rule despite
+          # no longer being minor/patch. `--remove-label` on a label that
+          # was never applied is a harmless no-op, not an error.
+          gh pr edit "$PR_URL" --add-label "major-update,needs-review" --remove-label "dependabot-vetted"
           gh pr comment "$PR_URL" --body "Major version bump: ${DEP_NAMES} (${PREV_VER} -> ${NEW_VER}). Requires manual review before merge."
