@@ -13,6 +13,8 @@ dependencies = [
     "numpy>=1.26",
     "scikit-learn>=1.5",
     "lightgbm>=4.0",
+    "dxentity>=0.1.9",
+    "paho-mqtt>=2.1",
 ]
 
 [project.scripts]
