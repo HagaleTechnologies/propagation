@@ -23,3 +23,27 @@ SPOT_SCHEMA: dict[str, pl.DataType] = {
     "snr_db": pl.Int16,
     "tx_dbm": pl.Int16,
 }
+
+
+def normalize_spot_columns(df: pl.DataFrame) -> pl.DataFrame:
+    """Add any SPOT_SCHEMA column missing from `df` as an all-null column,
+    then reorder to SPOT_SCHEMA's canonical column order.
+
+    Every extractor (wsprnet.py, rbn.py, pskreporter.py) builds its
+    DataFrame from a list of dicts that never carry dx_field/de_field
+    (those are derived later, downstream in features/universe.py), then
+    pads the missing SPOT_SCHEMA columns onto whatever the dict-derived
+    order happened to be -- which puts dx_field/de_field at the END, not in
+    their SPOT_SCHEMA-declared middle position. `pl.concat(...,
+    how="vertical_relaxed")` matches columns positionally, not by name, so
+    two frames that both nominally satisfy SPOT_SCHEMA but were built via
+    different paths (e.g. one from `pl.DataFrame(schema=SPOT_SCHEMA)` when
+    there were zero qualifying rows, one padded-from-dicts when there were)
+    can still fail to concat. Confirmed live: PRO-9's soak test crashed the
+    whole accumulator process on exactly this (`write_hourly_parquet`'s
+    on-disk-merge path, second flush to an hour whose first flush had no
+    qualifying rows) -- see docs/DECISIONS/ for the incident."""
+    missing = [col for col in SPOT_SCHEMA if col not in df.columns]
+    if missing:
+        df = df.with_columns([pl.lit(None).alias(col) for col in missing])
+    return df.select(list(SPOT_SCHEMA.keys()))

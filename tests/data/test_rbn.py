@@ -102,3 +102,20 @@ def test_extract_rbn_missing_csv_member_raises(tmp_path):
         pass
     with pytest.raises(ValueError, match="no .csv member"):
         extract_rbn(empty_zip, band="20m", resolve_location=_fake_resolver)
+
+
+def test_extract_rbn_column_order_matches_schema_regardless_of_qualifying_rows(zip_fixture):
+    """A source with qualifying rows and one with none must produce the SAME
+    column order (SPOT_SCHEMA's) -- otherwise concatenating this extractor's
+    output with another source's (e.g. eval_m3.py --include-rbn merging RBN
+    alongside WSPRnet, PRO-8) can crash pl.concat(..., how="vertical_relaxed")
+    exactly as it did for pskreporter.py's write_hourly_parquet during PRO-9's
+    live soak test."""
+    from propagation.data.schema import SPOT_SCHEMA
+
+    has_rows = extract_rbn(zip_fixture, band="20m", resolve_location=_fake_resolver)
+    no_rows = extract_rbn(zip_fixture, band="99m", resolve_location=_fake_resolver)
+    assert has_rows.n_qualifying > 0
+    assert no_rows.n_qualifying == 0
+    assert has_rows.spots.columns == list(SPOT_SCHEMA)
+    assert no_rows.spots.columns == list(SPOT_SCHEMA)
