@@ -209,6 +209,12 @@ def main() -> None:
         "--include-rbn", action="store_true",
         help="merge RBN (CW ground truth) spots into WSPRnet before building labels (PRO-8)",
     )
+    ap.add_argument(
+        "--p533-workers", type=int, default=None,
+        help="P533Model's ThreadPoolExecutor size (each worker forks an iturhfprop subprocess); "
+        "defaults to os.cpu_count() (P533Model's own default) -- pass a smaller number to reduce "
+        "CPU/memory contention on a machine running other concurrent load (see ADR 0006).",
+    )
     args = ap.parse_args()
 
     raw_dir = args.data_dir / "raw"
@@ -261,6 +267,7 @@ def main() -> None:
     p533_model = P533Model(
         ssn_by_month=ssn_by_month(eval_month_keys, cache_dir),
         cache_path=cache_dir / "p533_scores.parquet",
+        max_workers=args.p533_workers,
     )
 
     out_dir = args.data_dir / "reports" / "m3"
