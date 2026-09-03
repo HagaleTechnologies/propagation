@@ -9,6 +9,13 @@ Usage:
         --train-months 2024-01 2024-02 2024-03 --eval-months 2024-05 \
         --data-dir data
 
+    Pass --include-rbn to merge RBN (CW ground truth, propagation.data.rbn)
+    spots in alongside WSPRnet before building labels -- PRO-8's second
+    acceptance scenario. Downloads one archive per day in every requested
+    train/eval month (best-effort; a day with no RBN archive is skipped, not
+    fatal), so expect this to add real wall-clock time and disk beyond the
+    monthly WSPRnet archives.
+
 Storm/quiet slicing and the full 11-band x 6-horizon historical sweep are
 out of scope for this script (spec sec 7) -- this produces one headline
 table per (band group, horizon) for whatever bands/horizons are requested.
@@ -16,10 +23,15 @@ table per (band group, horizon) for whatever bands/horizons are requested.
 from __future__ import annotations
 
 import argparse
+import calendar
+import datetime as dt
 from pathlib import Path
 
+import httpx
 import polars as pl
 
+from propagation.data.rbn import LocationResolver, download_rbn_archive, extract_rbn
+from propagation.data.schema import SPOT_SCHEMA
 from propagation.data.spaceweather import fetch_omni2_range
 from propagation.data.wsprnet import download_wsprnet_archive, extract_wsprnet_bands
 from propagation.eval.report import write_headline_report
@@ -47,20 +59,88 @@ def _band_group(band: str) -> str:
     raise ValueError(f"band {band!r} not in any BAND_GROUPS entry")
 
 
-def _build_labels_for_month_all_bands(archive: Path, bands: list[str]) -> pl.DataFrame:
+def _merge_band_spots(spots: pl.DataFrame, extra_spots: pl.DataFrame | None, band: str) -> pl.DataFrame:
+    """Fold in `extra_spots` (e.g. RBN, PRO-8) for one band, if any exist for
+    it. Split out as its own pure function so the merge logic is testable
+    without a real WSPRnet archive fixture."""
+    if extra_spots is None or extra_spots.height == 0:
+        return spots
+    band_extra = extra_spots.filter(pl.col("band") == band)
+    if band_extra.height == 0:
+        return spots
+    return pl.concat([spots, band_extra], how="vertical_relaxed")
+
+
+def _build_labels_for_month_all_bands(
+    archive: Path, bands: list[str], extra_spots: pl.DataFrame | None = None
+) -> pl.DataFrame:
     extracts = extract_wsprnet_bands(archive, bands=bands)
     per_band = []
-    for extract in extracts.values():
-        uptime = build_receiver_uptime(extract.spots)
-        universe = build_universe(extract.spots, uptime)
-        per_band.append(build_labels(extract.spots, universe))
+    for band, extract in extracts.items():
+        spots = _merge_band_spots(extract.spots, extra_spots, band)
+        uptime = build_receiver_uptime(spots)
+        universe = build_universe(spots, uptime)
+        per_band.append(build_labels(spots, universe))
     return pl.concat(per_band, how="vertical_relaxed")
 
 
-def _build_labels_for_months(archives: dict[str, Path], bands: list[str]) -> pl.DataFrame:
+def _build_labels_for_months(
+    archives: dict[str, Path], bands: list[str], extra_spots_by_month: dict[str, pl.DataFrame] | None = None
+) -> pl.DataFrame:
     return pl.concat(
-        [_build_labels_for_month_all_bands(a, bands) for a in archives.values()], how="vertical_relaxed"
+        [
+            _build_labels_for_month_all_bands(a, bands, (extra_spots_by_month or {}).get(ym))
+            for ym, a in archives.items()
+        ],
+        how="vertical_relaxed",
     )
+
+
+def _rbn_month_archive_paths(ym: str, raw_dir: Path) -> list[tuple[dt.date, Path]]:
+    year, month = (int(x) for x in ym.split("-"))
+    n_days = calendar.monthrange(year, month)[1]
+    return [
+        (dt.date(year, month, day), raw_dir / f"rbn-{year:04d}{month:02d}{day:02d}.zip")
+        for day in range(1, n_days + 1)
+    ]
+
+
+def _download_rbn_month(ym: str, raw_dir: Path) -> list[Path]:
+    """Best-effort per day: reversebeacon.net not having an archive for a
+    given date is a real, plausible gap (not a bug) -- skip that day rather
+    than aborting the whole month's extraction over it."""
+    paths = []
+    for date, p in _rbn_month_archive_paths(ym, raw_dir):
+        if not p.exists():
+            print(f"downloading {p.name}...")
+            try:
+                download_rbn_archive(date, p)
+            except httpx.HTTPStatusError as e:
+                print(f"  skipping {p.name}: {e}")
+                continue
+        paths.append(p)
+    return paths
+
+
+def _build_rbn_spots_for_month(
+    ym: str, bands: list[str], raw_dir: Path, resolve_location: LocationResolver | None = None
+) -> pl.DataFrame:
+    """PRO-8's second acceptance scenario: RBN spots merged alongside
+    WSPRnet's, feeding the same build_universe/build_labels pipeline (see
+    _merge_band_spots). One extract_rbn call per (day, band) -- RBN's daily
+    archives are small (reversebeacon.net's own docs cite 300k+ spots on a
+    contest day, well under WSPRnet's tens-of-millions-per-month volume), so
+    unlike extract_wsprnet_bands this doesn't need a single-pass multi-band
+    variant to stay memory-safe."""
+    frames = []
+    for p in _download_rbn_month(ym, raw_dir):
+        for band in bands:
+            result = extract_rbn(p, band=band, resolve_location=resolve_location)
+            if result.spots.height:
+                frames.append(result.spots)
+    if not frames:
+        return pl.DataFrame(schema=SPOT_SCHEMA)
+    return pl.concat(frames, how="vertical_relaxed")
 
 
 def enforce_blocked_cv_gap(
@@ -125,6 +205,10 @@ def main() -> None:
     ap.add_argument("--train-months", nargs="+", required=True, help="YYYY-MM")
     ap.add_argument("--eval-months", nargs="+", required=True, help="YYYY-MM, held-out")
     ap.add_argument("--data-dir", type=Path, default=Path("data"))
+    ap.add_argument(
+        "--include-rbn", action="store_true",
+        help="merge RBN (CW ground truth) spots into WSPRnet before building labels (PRO-8)",
+    )
     args = ap.parse_args()
 
     raw_dir = args.data_dir / "raw"
@@ -149,8 +233,15 @@ def main() -> None:
             download_wsprnet_archive(int(y), int(m), p)
         eval_archives[ym] = p
 
-    train_labels = _build_labels_for_months(train_archives, args.bands)
-    eval_labels = _build_labels_for_months(eval_archives, args.bands)
+    rbn_by_month: dict[str, pl.DataFrame] = {}
+    if args.include_rbn:
+        for ym in sorted(set(args.train_months) | set(args.eval_months)):
+            print(f"extracting RBN spots for {ym}...")
+            rbn_by_month[ym] = _build_rbn_spots_for_month(ym, args.bands, raw_dir)
+            print(f"  {rbn_by_month[ym].height} qualifying RBN spots for {ym}")
+
+    train_labels = _build_labels_for_months(train_archives, args.bands, rbn_by_month)
+    eval_labels = _build_labels_for_months(eval_archives, args.bands, rbn_by_month)
 
     max_horizon = max(args.horizons)
     enforce_blocked_cv_gap(train_labels, eval_labels, max_horizon_hours=max_horizon)
