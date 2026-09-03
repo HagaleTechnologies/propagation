@@ -78,6 +78,46 @@ def test_write_hourly_parquet_merges_into_existing_file(tmp_path):
     assert set(spots["dx_call"].to_list()) == {"SP2EWQ", "W1AW"}
 
 
+def test_write_hourly_parquet_second_flush_after_all_rejected_first_flush(tmp_path):
+    """Regression for a real crash hit during PRO-9's live soak test
+    (2026-09-03): the empty-`rows` branch builds `spots` via
+    `pl.DataFrame(schema=SPOT_SCHEMA)` (dx_field/de_field in their
+    SPOT_SCHEMA-declared position), while the non-empty branch builds it
+    from parsed dicts (which never carry dx_field/de_field -- those are
+    derived later, downstream in features/universe.py) and appends the two
+    missing columns at the END instead. Two flushes to the same hour with
+    different row-emptiness landed those two orderings on disk vs. in
+    memory and crashed `pl.concat(..., how="vertical_relaxed")` with
+    `ComputeError: schema names differ: got dx_lat, expected dx_field` --
+    uncaught, which killed the whole accumulator process, not just this
+    flush. A second flush to an already-flushed hour is a real occurrence
+    on live traffic (out-of-order t_tx across independently-clocked
+    reporting stations near an hour boundary), not just a process-restart
+    edge case like test_write_hourly_parquet_merges_into_existing_file
+    above already covers."""
+    out_path = tmp_path / "pskreporter-2022-09-05T20.parquet"
+    hour = dt.datetime(2022, 9, 5, 20, tzinfo=dt.timezone.utc)
+    unparseable = {"sq": 1}  # missing f/md/rp/sc/rc -> parse_pskreporter_payload returns None -> rows=[]
+    first = write_hourly_parquet([unparseable], hour=hour, out_path=out_path)
+    assert first.n_qualifying == 0
+    assert out_path.exists()
+
+    second = write_hourly_parquet([REAL_PAYLOAD], hour=hour, out_path=out_path)  # must not raise
+    assert second.n_qualifying == 1
+    assert pl.read_parquet(out_path).height == 1
+
+
+def test_write_hourly_parquet_first_flush_nonempty_second_flush_all_rejected(tmp_path):
+    """Same bug, opposite order: the FIRST flush has real rows (append-order
+    on disk), the SECOND has none (schema-order in memory) -- must also not
+    raise, and must leave the first flush's row intact."""
+    out_path = tmp_path / "pskreporter-2022-09-05T20.parquet"
+    hour = dt.datetime(2022, 9, 5, 20, tzinfo=dt.timezone.utc)
+    write_hourly_parquet([REAL_PAYLOAD], hour=hour, out_path=out_path)
+    write_hourly_parquet([{"sq": 1}], hour=hour, out_path=out_path)  # must not raise
+    assert pl.read_parquet(out_path).height == 1
+
+
 class _FakeMqttClient:
     """Stands in for paho.mqtt.client.Client -- no network, records what the
     accumulator would have done to a real client."""

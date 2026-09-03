@@ -43,7 +43,7 @@ import polars as pl
 
 from propagation.data.dedup import dedup_spots
 from propagation.data.hygiene import is_qualifying_spot
-from propagation.data.schema import SPOT_SCHEMA
+from propagation.data.schema import SPOT_SCHEMA, normalize_spot_columns
 
 RBN_ARCHIVE_URL = "https://data.reversebeacon.net/rbn_history/{date:%Y%m%d}.zip"
 
@@ -202,9 +202,7 @@ def extract_rbn(
             spots = pl.DataFrame(schema=SPOT_SCHEMA)
         else:
             spots = pl.concat([pl.read_parquet(p) for p in chunk_paths], how="vertical_relaxed")
-        for col in SPOT_SCHEMA:
-            if col not in spots.columns:
-                spots = spots.with_columns(pl.lit(None).alias(col))
+        spots = normalize_spot_columns(spots)
         spots = dedup_spots(spots)
 
     return ExtractResult(
