@@ -18,12 +18,18 @@ extractor resolves `{dx,de}_{lat,lon}` via a DXCC callsign lookup (`dxentity`,
 BSD-3-Clause; its underlying cty.plist data is fetched from
 country-files.com at first use and cached ~/.local/cty for a week -- a
 network dependency this extractor inherits, separate from this repo's own
-license). That resolution is **country-centroid, not station-level** --
-materially coarser than a 4-char Maidenhead grid (thousands of km vs. tens of
-km). Every RBN row's distance_km/bearing_deg/midpoint_geomag_lat feature is
-therefore lower-precision than the WSPRnet baseline. This is a real quality
-gap worth weighing before claiming "M2's bar still clears with RBN
-included" (PRO-8's second acceptance scenario) -- it may not, or may need
+license), then derives `{dx,de}_grid` from that lat/lon via
+`geo.latlon_to_grid` -- without this, `dx_grid`/`de_grid` would stay null and
+every RBN row would silently vanish from build_universe/build_labels, which
+key their path-cell bucketing purely off dx_grid[:2]/de_grid[:2] and have no
+lat/lon fallback of their own (RBN spots would still pass hygiene QA on
+dx_lat/dx_lon alone -- the gap was downstream, not at qa/checks.py). That
+resolution is **country-centroid, not station-level** -- materially coarser
+than a 4-char Maidenhead grid (thousands of km vs. tens of km), so
+distance_km/bearing_deg/midpoint_geomag_lat (and now the path-cell itself)
+are lower-precision than the WSPRnet baseline. This is a real quality gap
+worth weighing when interpreting "M2's bar still clears with RBN included"
+(PRO-8's second acceptance scenario) -- it may narrow the margin, or may need
 per-source uncertainty weighting downstream, which does not exist yet.
 """
 from __future__ import annotations
@@ -42,6 +48,7 @@ import httpx
 import polars as pl
 
 from propagation.data.dedup import dedup_spots
+from propagation.data.geo import latlon_to_grid
 from propagation.data.hygiene import is_qualifying_spot
 from propagation.data.schema import SPOT_SCHEMA, normalize_spot_columns
 
@@ -125,8 +132,13 @@ def parse_rbn_row(row: dict, resolve_location: LocationResolver) -> dict | None:
         "freq_hz": round(freq_khz * 1000),
         "dx_call": dx_call,
         "de_call": de_call,
-        "dx_grid": None,
-        "de_grid": None,
+        # Derived from the same resolved lat/lon below via latlon_to_grid --
+        # coarse (country-centroid precision, see module docstring), but
+        # this is what lets an RBN spot participate in build_universe's
+        # dx_field/de_field cell bucketing at all (it slices dx_grid/de_grid
+        # directly and has no lat/lon fallback of its own).
+        "dx_grid": latlon_to_grid(*dx_loc) if dx_loc else None,
+        "de_grid": latlon_to_grid(*de_loc) if de_loc else None,
         "dx_lat": dx_loc[0] if dx_loc else None,
         "dx_lon": dx_loc[1] if dx_loc else None,
         "de_lat": de_loc[0] if de_loc else None,

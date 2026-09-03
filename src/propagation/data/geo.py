@@ -24,6 +24,28 @@ def grid_to_latlon(grid: str) -> tuple[float, float]:
     raise ValueError(f"invalid Maidenhead grid: {grid!r}")
 
 
+def latlon_to_grid(lat: float, lon: float, precision: int = 4) -> str:
+    """Inverse of grid_to_latlon: standard Maidenhead locator for a point.
+    `precision` is 2 (field only) or 4 (field + square); anything else is
+    rejected since this repo has no use for finer (subsquare) precision."""
+    if precision not in (2, 4):
+        raise ValueError(f"precision must be 2 or 4, got {precision!r}")
+    # Clamp just inside the top edge so lon=180/lat=90 land in the last
+    # field/square instead of wrapping to the first (360 % 20 == 0).
+    lon_frac = min(max(lon, -180.0), 180.0) + 180.0
+    lat_frac = min(max(lat, -90.0), 90.0) + 90.0
+    lon_frac = min(lon_frac, 359.999999)
+    lat_frac = min(lat_frac, 179.999999)
+    field_lon = int(lon_frac / 20)
+    field_lat = int(lat_frac / 10)
+    grid = chr(ord("A") + field_lon) + chr(ord("A") + field_lat)
+    if precision == 2:
+        return grid
+    square_lon = int((lon_frac % 20) / 2)
+    square_lat = int(lat_frac % 10)
+    return grid + str(square_lon) + str(square_lat)
+
+
 def great_circle_km(lat1: float, lon1: float, lat2: float, lon2: float) -> float:
     p1, p2 = math.radians(lat1), math.radians(lat2)
     dphi = math.radians(lat2 - lat1)
