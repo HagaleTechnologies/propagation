@@ -51,7 +51,13 @@ def test_parse_rbn_row_maps_fields():
     assert parsed["band"] == "20m"
     assert parsed["dx_call"] == "K9EI"
     assert parsed["de_call"] == "W1NT"  # skimmer suffix stripped
-    assert parsed["dx_grid"] is None and parsed["de_grid"] is None
+    # dx_grid/de_grid are derived from the resolved (country-centroid) lat/lon
+    # via latlon_to_grid, not a station-precise grid -- see rbn.py's module
+    # docstring for the precision caveat. This is what lets RBN spots
+    # participate in build_universe/build_labels's field-keyed cell
+    # bucketing (PRO-8's second acceptance scenario), which keys purely off
+    # dx_grid/de_grid and ignores dx_lat/dx_lon entirely.
+    assert parsed["dx_grid"] == "EN61" and parsed["de_grid"] == "FN41"
     assert parsed["dx_lat"] == 41.6 and parsed["dx_lon"] == -87.0
     assert parsed["de_lat"] == 41.5 and parsed["de_lon"] == -71.3
     assert parsed["snr_db"] == 33
@@ -71,6 +77,7 @@ def test_parse_rbn_row_unresolved_location_is_null():
     }
     parsed = parse_rbn_row(row, _fake_resolver)
     assert parsed["de_lat"] is None and parsed["de_lon"] is None
+    assert parsed["de_grid"] is None  # no lat/lon to derive a grid from
 
 
 @pytest.fixture
