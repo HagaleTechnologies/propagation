@@ -45,7 +45,7 @@ import polars as pl
 
 from propagation.data.dedup import dedup_spots
 from propagation.data.hygiene import is_qualifying_spot
-from propagation.data.schema import SPOT_SCHEMA
+from propagation.data.schema import SPOT_SCHEMA, normalize_spot_columns
 
 logger = logging.getLogger(__name__)
 
@@ -214,14 +214,15 @@ def write_hourly_parquet(raw_payloads: list[dict], hour: dt.datetime, out_path: 
         spots = pl.DataFrame(schema=SPOT_SCHEMA)
     else:
         spots = pl.DataFrame(rows, schema_overrides={"ts": pl.Datetime("us", "UTC")})
-        for col in SPOT_SCHEMA:
-            if col not in spots.columns:
-                spots = spots.with_columns(pl.lit(None).alias(col))
+        spots = normalize_spot_columns(spots)
         spots = dedup_spots(spots)
 
     if out_path.exists():
-        existing = pl.read_parquet(out_path)
-        spots = dedup_spots(pl.concat([existing, spots], how="vertical_relaxed"))
+        # normalize_spot_columns on both sides -- see its docstring for why a
+        # column-order mismatch here (not just a schema mismatch) can crash
+        # this concat even when both frames are nominally SPOT_SCHEMA-shaped.
+        existing = normalize_spot_columns(pl.read_parquet(out_path))
+        spots = dedup_spots(pl.concat([existing, normalize_spot_columns(spots)], how="vertical_relaxed"))
     spots.write_parquet(out_path)
 
     return FlushResult(

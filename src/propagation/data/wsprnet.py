@@ -11,7 +11,7 @@ import polars as pl
 
 from propagation.data.dedup import dedup_spots
 from propagation.data.hygiene import is_qualifying_spot
-from propagation.data.schema import SPOT_SCHEMA
+from propagation.data.schema import SPOT_SCHEMA, normalize_spot_columns
 
 WSPR_BAND_CODE_TO_BAND: dict[int, str] = {
     1: "160m", 3: "80m", 5: "60m", 7: "40m", 10: "30m",
@@ -140,9 +140,7 @@ def extract_wsprnet(archive_path: Path, band: str, chunk_size: int = 200_000) ->
             spots = pl.DataFrame(schema=SPOT_SCHEMA)
         else:
             spots = pl.concat([pl.read_parquet(p) for p in chunk_paths], how="vertical_relaxed")
-        for col in SPOT_SCHEMA:
-            if col not in spots.columns:
-                spots = spots.with_columns(pl.lit(None).alias(col))
+        spots = normalize_spot_columns(spots)
         spots = dedup_spots(spots)
 
     return ExtractResult(
@@ -209,9 +207,7 @@ def extract_wsprnet_bands(
                 spots = pl.DataFrame(schema=SPOT_SCHEMA)
             else:
                 spots = pl.concat([pl.read_parquet(p) for p in chunk_paths[b]], how="vertical_relaxed")
-            for col in SPOT_SCHEMA:
-                if col not in spots.columns:
-                    spots = spots.with_columns(pl.lit(None).alias(col))
+            spots = normalize_spot_columns(spots)
             spots = dedup_spots(spots)
             results[b] = ExtractResult(
                 spots=spots, n_lines_read=n_lines_read, n_parsed=n_parsed[b],
