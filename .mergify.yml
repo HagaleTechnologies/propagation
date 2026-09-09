@@ -22,19 +22,23 @@
 # which must NOT be treated as merge-eligible) and stay plain
 # check-success conditions.
 #
-# Trusted-author gate: `thagale` and `dependabot[bot]` are the only two
-# authors that can ever auto-queue -- this repo is public, its ruleset has
-# `required_approving_review_count: 0`, and the native auto-merge workflow
-# this queue replaces had NO author-association check of its own to carry
-# forward -- without this, any outside contributor's PR that goes green on
-# all three required checks would auto-queue and merge with zero human in
-# the loop. Mergify has no direct equivalent of GitHub's
-# `author_association` (no built-in role/collaborator lookup), only an
-# exact-login match, so `author = thagale` is the closest available
-# primitive. This diverges the moment a second trusted human collaborator
-# is added -- their PRs won't auto-queue under a single-login condition and
-# will need either a manual `@Mergifyio queue` comment or a new rule added
-# with their login.
+# Trusted-author gate: `thagale`, `catalyst-cloud-connector[bot]`, and
+# `dependabot[bot]` are the only authors that can ever auto-queue -- this
+# repo is public, its ruleset has `required_approving_review_count: 0`, and
+# the native auto-merge workflow this queue replaces had NO
+# author-association check of its own to carry forward -- without this,
+# any outside contributor's PR that goes green on all three required
+# checks would auto-queue and merge with zero human in the loop. Mergify
+# has no direct equivalent of GitHub's `author_association` (no built-in
+# role/collaborator lookup), only an exact-login match, so an explicit
+# login list is the closest available primitive.
+# `catalyst-cloud-connector[bot]` (Catalyst Cloud's own PR author identity)
+# is trusted equally to `thagale` in the FIRST rule below, not given its
+# own dependabot-style label-gated rule -- CI/Codex review passing is the
+# actual gate either way, the same as it always was for a human author.
+# This diverges the moment a second trusted human collaborator is added --
+# their PRs won't auto-queue under a fixed login list and will need either
+# a manual `@Mergifyio queue` comment or a new rule added with their login.
 #
 # The two authors get SEPARATE rules below, not one shared rule, because
 # they need different admission tests. `needs-review` is only ever applied
@@ -81,12 +85,14 @@ queue_rules:
           - label = dependabot-vetted
 
 pull_request_rules:
-  - name: queue on green + threads resolved (thagale)
+  - name: queue on green + threads resolved (thagale, catalyst-cloud-connector)
     conditions:
       - base = main
       - -draft
       - -closed
-      - author = thagale
+      - or:
+          - author = thagale
+          - author = catalyst-cloud-connector[bot]
       - "#review-threads-unresolved = 0"
       - check-success = Wiki lint
       - check-success = test
