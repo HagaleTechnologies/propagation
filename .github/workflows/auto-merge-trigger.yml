@@ -78,13 +78,32 @@ jobs:
       - name: Enable auto-merge
         env:
           PR_URL: ${{ github.event.pull_request.html_url }}
-          GH_TOKEN: ${{ secrets.CODEX_REVIEW_PAT }}
+          # Both tokens passed through; the script below picks per-author, not a single
+          # env-level GH_TOKEN (see the selection immediately below).
+          CODEX_TOKEN: ${{ secrets.CODEX_REVIEW_PAT }}
+          READ_TOKEN: ${{ github.token }}
           REPO: ${{ github.repository }}
           PR: ${{ github.event.pull_request.number }}
           PR_AUTHOR: ${{ github.event.pull_request.user.login }}
           EVENT_ACTION: ${{ github.event.action }}
           EVENT_LABEL: ${{ github.event.label.name }}
         run: |
+          # Token selection (Codex P1, found reviewing this PR): wait-for-codex.yml's own
+          # header comment documents that GitHub withholds custom Actions secrets --
+          # CODEX_REVIEW_PAT included -- for any workflow run triggered by a dependabot[bot]
+          # actor event (this job's own `opened`/`synchronize`/etc events ARE exactly that, for
+          # a Dependabot-authored PR). Using CODEX_TOKEN unconditionally would fail auth for
+          # every single Dependabot PR. GITHUB_TOKEN (READ_TOKEN here) is proven to work in
+          # this same trigger context already -- dependabot-auto-merge.yml's own approve/label/
+          # admit steps already write successfully with it. thagale and
+          # catalyst-cloud-connector[bot] PRs are unaffected by the withholding and keep using
+          # CODEX_TOKEN, matching every other migrated repo's own admission pattern.
+          if [ "$PR_AUTHOR" = "dependabot[bot]" ]; then
+            export GH_TOKEN="$READ_TOKEN"
+          else
+            export GH_TOKEN="$CODEX_TOKEN"
+          fi
+
           # labeled: a maintainer can manually attach needs-human at any time, including on a PR
           # that was already armed by an earlier opened/reopened/synchronize event. This label
           # always wins over an existing arm: disarm unconditionally and stop.

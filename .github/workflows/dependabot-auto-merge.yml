@@ -32,21 +32,61 @@ jobs:
         run: |
           gh pr review "$PR_URL" --approve --body "Auto-approved: ${UPDATE_TYPE} update for ${DEP_NAMES}"
 
-      # Positive signal, not a negative exclusion: the Mergify queue rule
-      # for dependabot[bot] requires THIS label to be present, rather than
-      # relying on `needs-review`'s absence -- if this workflow is delayed
-      # or fails before reaching this step, the PR simply never gets
-      # vetted and never queues, instead of queueing by default.
-      - name: Mark minor/patch update as vetted for the Mergify queue
+      # Positive signal, not a negative exclusion: the native-queue admission gate for
+      # dependabot[bot] requires THIS label to be present, rather than relying on
+      # `needs-review`'s absence -- if this workflow is delayed or fails before reaching this
+      # step, the PR simply never gets vetted and never queues, instead of queueing by default.
+      - name: Mark minor/patch update as vetted
         if: steps.metadata.outputs.update-type != 'version-update:semver-major'
         env:
           PR_URL: ${{ github.event.pull_request.html_url }}
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           gh label create "dependabot-vetted" --repo "$GITHUB_REPOSITORY" --color 0e8a16 \
-            --description "Required by .mergify.yml's dependabot queue rule; applied for minor/patch bumps only" \
+            --description "Required by auto-merge-trigger.yml's dependabot admission gate; applied for minor/patch bumps only" \
             >/dev/null 2>&1 || true
           gh pr edit "$PR_URL" --add-label "dependabot-vetted"
+
+      # Admit inline, right here, rather than relying on auto-merge-trigger.yml's own
+      # `labeled: dependabot-vetted` trigger to pick this up (Codex P1, found reviewing this
+      # PR): the label edit above runs with `secrets.GITHUB_TOKEN`, and GitHub's anti-recursion
+      # guard means an event authored by the default GITHUB_TOKEN does NOT trigger other
+      # workflow runs -- auto-merge-trigger.yml's `labeled`/`unlabeled` handling for
+      # dependabot-vetted is a defensive fallback for the rare case where a LATER genuine
+      # dependabot push (a real `synchronize` event, not GITHUB_TOKEN-authored) happens to see
+      # this label already present; it is NOT the primary mechanism, and cannot be, since this
+      # label mutation itself will never trigger it. This inline call is what actually performs
+      # first-time admission for the overwhelmingly common case (this vetting step being the
+      # PR's own most recent event).
+      #
+      # GITHUB_TOKEN, not CODEX_REVIEW_PAT: this job is itself triggered by a dependabot-actor
+      # event, and wait-for-codex.yml's own header comment documents that GitHub withholds
+      # custom Actions secrets (CODEX_REVIEW_PAT included) for any workflow run triggered by
+      # dependabot[bot] -- CODEX_REVIEW_PAT expands to empty here, so using it would fail auth
+      # for every single Dependabot PR. GITHUB_TOKEN is proven to work in this exact trigger
+      # context already (the approve/label steps above already write successfully with it).
+      # This does mean the eventual merge-queue commit may be attributed to GITHUB_TOKEN rather
+      # than CODEX_REVIEW_PAT, unlike the thagale/catalyst-cloud-connector[bot] admission path
+      # in auto-merge-trigger.yml -- accepted the same way this workflow's own approve/label
+      # actions already accept it, since no other credential is available here at all.
+      - name: Admit the vetted PR to the native merge queue
+        if: steps.metadata.outputs.update-type != 'version-update:semver-major'
+        env:
+          PR_URL: ${{ github.event.pull_request.html_url }}
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          REPO: ${{ github.repository }}
+        run: |
+          merge_queue_live=$(gh api "repos/${REPO}/rules/branches/main" --jq '[.[] | select(.type == "merge_queue")] | length > 0' 2>/dev/null || echo false)
+          if [ "$merge_queue_live" != "true" ]; then
+            echo "::notice::No merge_queue ruleset rule exists yet for main -- standing down without arming native auto-merge. Mergify's own queue is still the sole merge authority until the ruleset update lands."
+            exit 0
+          fi
+          current_base=$(gh pr view "$PR_URL" --json baseRefName --jq .baseRefName)
+          if [ "$current_base" != "main" ]; then
+            echo "::notice::PR's base is '$current_base' (not main) as of this mutation attempt -- standing down without arming auto-merge."
+            exit 0
+          fi
+          gh pr merge "$PR_URL" --auto --squash
 
       - name: Label major updates for review
         if: steps.metadata.outputs.update-type == 'version-update:semver-major'
@@ -60,7 +100,7 @@ jobs:
           # A grouped update can be reclassified from minor/patch to major
           # on a later Dependabot refresh of the SAME PR -- remove any
           # stale positive vetting signal from an earlier classification,
-          # or the PR could still satisfy Mergify's dependabot rule despite
+          # or the PR could still satisfy the native admission gate despite
           # no longer being minor/patch. Unlike --add-label, gh pr edit
           # --remove-label on a label that doesn't exist YET on the repo
           # (e.g. the very first Dependabot PR ever happens to be major, so
@@ -70,7 +110,37 @@ jobs:
           # label defensively here too (idempotent, same as the minor/patch
           # step) so it's guaranteed to exist before either path touches it.
           gh label create "dependabot-vetted" --repo "$GITHUB_REPOSITORY" --color 0e8a16 \
-            --description "Required by .mergify.yml's dependabot queue rule; applied for minor/patch bumps only" \
+            --description "Required by auto-merge-trigger.yml's dependabot admission gate; applied for minor/patch bumps only" \
             >/dev/null 2>&1 || true
           gh pr edit "$PR_URL" --add-label "major-update,needs-review" --remove-label "dependabot-vetted"
           gh pr comment "$PR_URL" --body "Major version bump: ${DEP_NAMES} (${PREV_VER} -> ${NEW_VER}). Requires manual review before merge."
+
+      # Disarm inline, right here, for the exact same reason the admission step above is
+      # inline (Codex P1, found reviewing this PR): the label removal above runs with
+      # GITHUB_TOKEN, so it can never trigger auto-merge-trigger.yml's own `unlabeled:
+      # dependabot-vetted` handling. Without this, a Dependabot PR that was admitted while
+      # vetted, then reclassified to major mid-queue (a grouped update's later refresh),
+      # would stay armed or queued indefinitely despite no longer being trusted -- exactly the
+      # security gap the continuous re-check exists to close.
+      - name: Disarm/dequeue the reclassified PR
+        if: steps.metadata.outputs.update-type == 'version-update:semver-major'
+        env:
+          PR_URL: ${{ github.event.pull_request.html_url }}
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          REPO: ${{ github.repository }}
+          PR: ${{ github.event.pull_request.number }}
+        run: |
+          gh pr merge "$PR_URL" --disable-auto >/dev/null 2>&1 || true
+          OWNER_PART="${REPO%%/*}"; NAME_PART="${REPO##*/}"
+          queue_state=$(gh api graphql -f query='
+            query($owner: String!, $name: String!, $pr: Int!) {
+              repository(owner: $owner, name: $name) {
+                pullRequest(number: $pr) { id isInMergeQueue }
+              }
+            }' -f owner="$OWNER_PART" -f name="$NAME_PART" -F pr="$PR" 2>/dev/null)
+          pr_node_id=$(printf '%s' "$queue_state" | jq -r '.data.repository.pullRequest.id')
+          in_queue=$(printf '%s' "$queue_state" | jq -r '.data.repository.pullRequest.isInMergeQueue')
+          if [ "$in_queue" = "true" ] && [ -n "$pr_node_id" ] && [ "$pr_node_id" != "null" ]; then
+            echo "::notice::PR #$PR is in the native merge queue -- dequeuing after reclassification to major."
+            gh api graphql -f query='mutation($id: ID!) { dequeuePullRequest(input: {id: $id}) { clientMutationId } }' -f id="$pr_node_id" >/dev/null 2>&1 || true
+          fi

@@ -232,6 +232,28 @@ fi
 # CODEX_REVIEW_PAT avoids that suppression uniformly.
 MERGE_TOKEN="$GH_TOKEN"
 
+# Trust gate re-check (Codex P1, propagation migration): this script re-arms an
+# ALREADY-admitted PR after a merge-group CI failure, but admission trust for a
+# dependabot[bot]-authored PR is conditional on the `dependabot-vetted` label, which can
+# be removed (reclassification to major) at any point between the original admission
+# and this retry -- including during the failed merge-group attempt itself. Without
+# re-checking here, a PR that lost its vetting mid-flight would get blindly re-armed by
+# this retry, bypassing the same trust predicate auto-merge-trigger.yml enforces at
+# every other admission point. thagale and catalyst-cloud-connector[bot] need no label
+# check (matches auto-merge-trigger.yml's own is_trusted_author()).
+pr_author=$(GH_TOKEN="$READ_TOKEN" gh pr view "$PR" --repo "$REPO" --json author --jq '.author.login')
+pr_labels=$(GH_TOKEN="$READ_TOKEN" gh api --paginate "repos/${REPO}/issues/${PR}/labels" --jq '.[].name')
+is_trusted_author() {
+  local author="$1" current_labels="$2"
+  if [ "$author" = "thagale" ] || [ "$author" = "catalyst-cloud-connector[bot]" ]; then
+    return 0
+  fi
+  if [ "$author" = "dependabot[bot]" ]; then
+    grep -qxF "dependabot-vetted" <<< "$current_labels" && return 0
+  fi
+  return 1
+}
+
 # Re-check the merge_queue ruleset rule AND the base immediately before mutating
 # (Codex P2, round 5, extending the admission-gating fix already applied to both
 # admission workflows' own arming calls): --match-head-commit pins the head
@@ -248,6 +270,9 @@ if [ "$merge_queue_live" != "true" ]; then
   echo "::notice::No merge_queue ruleset rule exists for main as of this retry attempt -- standing down without retrying or consuming this head's retry budget on PR #$PR."
 elif [ "$current_base" != "main" ]; then
   echo "::notice::PR #$PR's base changed to '$current_base' (was main) since pr-state ran -- auto-merge-trigger.yml itself would refuse this base too. Standing down without consuming this head's retry budget."
+elif ! is_trusted_author "$pr_author" "$pr_labels"; then
+  echo "::notice::PR #$PR's author ($pr_author) is no longer trusted for auto-admission as of this retry attempt (e.g. dependabot-vetted was removed after a reclassification to major) -- disarming/dequeuing instead of retrying, and not consuming this head's retry budget."
+  disarm_dequeue_and_verify_or_fail "author no longer trusted at retry time" || exit 1
 elif GH_TOKEN="$MERGE_TOKEN" gh pr merge "$PR" --repo "$REPO" --auto --squash --match-head-commit "$HEAD_SHA"; then
   # GH_TOKEN="$READ_TOKEN" here too: a successful merge call only proves
   # CODEX_REVIEW_PAT has pull-requests:write -- it says nothing about whether it
