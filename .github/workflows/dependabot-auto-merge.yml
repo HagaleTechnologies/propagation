@@ -87,15 +87,55 @@ jobs:
           REPO: ${{ github.repository }}
           PR: ${{ github.event.pull_request.number }}
         run: |
-          # needs-human check (Codex P1, round 2): a manually-applied pause must not be
-          # silently overridden by a later synchronize event that happens to re-vet the PR --
-          # this is a LIVE fetch, not the webhook-delivery-time labels snapshot, matching
-          # auto-merge-trigger.yml's own needs-human check exactly (same label, same semantics,
-          # no staleness clearing here since this path never applied needs-human itself and has
-          # no basis to judge it stale).
+          # Fail-closed disarm-and-verify, reused by the needs-human branch below (Codex P1,
+          # round 3): a pending-run eviction (GitHub retains only one pending run per
+          # concurrency group) can replace the labeled event's own disarm run before it
+          # executes -- this run, observing the pause live, may be the one actually positioned
+          # to finish that disarm, so it must not just stand down silently. Mirrors
+          # auto-merge-trigger.yml's still_armed_or_queued()-based disarm exactly.
+          disarm_dequeue_and_verify_or_fail() {
+            local reason="$1"
+            gh pr merge "$PR_URL" --disable-auto >/dev/null 2>&1 || true
+            local queue_state pr_node_id in_queue
+            queue_state=$(gh api graphql -f query='
+              query($owner: String!, $name: String!, $pr: Int!) {
+                repository(owner: $owner, name: $name) { pullRequest(number: $pr) { id isInMergeQueue } }
+              }' -f owner="${REPO%%/*}" -f name="${REPO##*/}" -F pr="$PR" 2>/dev/null)
+            pr_node_id=$(printf '%s' "$queue_state" | jq -r '.data.repository.pullRequest.id' 2>/dev/null)
+            in_queue=$(printf '%s' "$queue_state" | jq -r '.data.repository.pullRequest.isInMergeQueue' 2>/dev/null)
+            if [ "$in_queue" = "true" ] && [ -n "$pr_node_id" ] && [ "$pr_node_id" != "null" ]; then
+              echo "::notice::PR #$PR is in the native merge queue -- dequeuing ($reason)."
+              gh api graphql -f query='mutation($id: ID!) { dequeuePullRequest(input: {id: $id}) { clientMutationId } }' -f id="$pr_node_id" >/dev/null 2>&1 || true
+            fi
+            local state armed queued
+            state=$(gh api graphql -f query='
+              query($owner: String!, $name: String!, $pr: Int!) {
+                repository(owner: $owner, name: $name) { pullRequest(number: $pr) { autoMergeRequest { enabledAt } isInMergeQueue } }
+              }' -f owner="${REPO%%/*}" -f name="${REPO##*/}" -F pr="$PR" 2>/dev/null)
+            armed=$(printf '%s' "$state" | jq -r '.data.repository.pullRequest.autoMergeRequest != null' 2>/dev/null)
+            queued=$(printf '%s' "$state" | jq -r '.data.repository.pullRequest.isInMergeQueue' 2>/dev/null)
+            if { [ "$armed" != "true" ] && [ "$armed" != "false" ]; } || { [ "$queued" != "true" ] && [ "$queued" != "false" ]; }; then
+              echo "::error::Could not confirm PR #$PR's armed/queued state ($reason) -- treating as unsafe (fail closed)." >&2
+              return 1
+            fi
+            if [ "$armed" = "true" ] || [ "$queued" = "true" ]; then
+              echo "::error::PR #$PR is STILL ARMED and/or still in the merge queue (armed: $armed, queued: $queued) despite disable-auto/dequeue ($reason)." >&2
+              return 1
+            fi
+            return 0
+          }
+
+          # needs-human check (Codex P1, round 2; disarm added round 3): a manually-applied
+          # pause must not be silently overridden by a later synchronize event that happens to
+          # re-vet the PR -- this is a LIVE fetch, not the webhook-delivery-time labels
+          # snapshot, matching auto-merge-trigger.yml's own needs-human check. If this run
+          # observes the pause live, it actively disarms/dequeues rather than just standing
+          # down -- see the pending-run-eviction rationale on disarm_dequeue_and_verify_or_fail
+          # above.
           current_labels=$(gh api --paginate "repos/${REPO}/issues/${PR}/labels" --jq '.[].name')
           if grep -qxF "needs-human" <<< "$current_labels"; then
-            echo "::notice::PR #$PR has needs-human attached -- standing down without arming auto-merge despite passing dependabot vetting."
+            echo "::notice::PR #$PR has needs-human attached -- ensuring auto-merge is not armed/queued despite passing dependabot vetting."
+            disarm_dequeue_and_verify_or_fail "needs-human observed during dependabot admission" || exit 1
             exit 0
           fi
           merge_queue_live=$(gh api "repos/${REPO}/rules/branches/main" --jq '[.[] | select(.type == "merge_queue")] | length > 0' 2>/dev/null || echo false)
