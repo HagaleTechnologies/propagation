@@ -29,6 +29,25 @@ REPO="${REPO:-$GITHUB_REPOSITORY}"
 # gate on `steps.retry.conclusion == 'success'` then correctly withholds the dedup
 # marker, leaving the attempt eligible for a rerun to actually deliver the signal.
 attach_needs_human_or_fail() {
+  # Recheck the head immediately before pausing (Codex P1, round 8, propagation migration):
+  # both callers of this shared helper already checked the head at THEIR OWN call site
+  # (before deciding to call this at all), but time passes between that check and this
+  # function's own label POST below (an earlier gh label create attempt, prior retries in the
+  # calling branch, etc.) -- a replacement commit landing in that window would get a PR-wide
+  # pause and an old-HEAD_SHA12 provenance marker attached to it instead of the commit this
+  # call was actually evaluating. Especially persistent for a Dependabot-authored PR here:
+  # dependabot-auto-merge.yml's own admission step only DISARMS when it observes needs-human
+  # (it has no staleness-clearing logic of its own), and auto-merge-trigger.yml now excludes
+  # the dependabot[bot] actor entirely (see that file's own header) -- so nothing would ever
+  # clear a wrongly-attached pause on a Dependabot PR's new revision, unlike every other
+  # migrated repo where auto-merge-trigger.yml's needs_human_is_stale() eventually catches it.
+  local current_head_sha_final
+  current_head_sha_final=$(GH_TOKEN="$READ_TOKEN" gh pr view "$PR" --repo "$REPO" --json headRefOid --jq .headRefOid 2>/dev/null)
+  if [ -n "$current_head_sha_final" ] && [ "$current_head_sha_final" != "$HEAD_SHA" ]; then
+    echo "::notice::PR #$PR's head moved from ${HEAD_SHA12:-unknown} to ${current_head_sha_final:0:12} immediately before this pause would have been attached -- standing down without pausing the replacement revision."
+    return 0
+  fi
+
   # GH_TOKEN="$READ_TOKEN" on the create call too: this step's default GH_TOKEN is
   # CODEX_REVIEW_PAT, not github.token -- and the scenario that lands us in a
   # fail-closed branch calling this helper in the first place can be EXACTLY
