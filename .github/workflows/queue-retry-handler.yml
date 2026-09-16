@@ -450,6 +450,24 @@ jobs:
             fi
           fi
 
+          # Revalidate the head AGAIN, immediately before pausing (Codex P1, round 5): the
+          # check at the top of this step only proves the head hadn't moved at STEP START --
+          # several `gh api` calls (the armed/queued recheck and its own disarm sequence
+          # above) run between that check and this label attach. If a new commit lands during
+          # that gap, this step would label the REPLACEMENT revision with an old-SHA marker,
+          # and since a needs-human label is PR-wide (not SHA-scoped), the new revision is
+          # incorrectly paused. Its own concurrent synchronize-triggered auto-merge-trigger.yml
+          # run may already have legitimately re-armed it (having read needs-human as absent
+          # moments earlier) before this step's label POST lands -- that arm then gets
+          # silently overridden with no guaranteed future event to re-trigger a staleness
+          # check and self-heal it. Stand down instead of pausing a revision this handoff was
+          # never actually evaluating.
+          current_head_sha_final=$(gh pr view "$PR" --repo "$REPO" --json headRefOid --jq .headRefOid)
+          if [ "$current_head_sha_final" != "$HEAD_SHA" ]; then
+            echo "::notice::PR #$PR's head moved from $HEAD_SHA12 to ${current_head_sha_final:0:12} during this handoff step -- standing down without pausing the replacement revision; ensuring nothing this step armed/disarmed above is left inconsistent is out of scope here since the replacement revision gets its own fresh evaluation."
+            exit 0
+          fi
+
           # Label first, THEN the marker comment: every staleness checker only trusts a
           # marker whose timestamp is AT OR AFTER the label's own most recent `labeled`
           # timeline event. Posting the marker comment BEFORE the label attach would
