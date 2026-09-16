@@ -86,6 +86,8 @@ jobs:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           REPO: ${{ github.repository }}
           PR: ${{ github.event.pull_request.number }}
+          # The head fetch-metadata actually classified -- see --match-head-commit below.
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
         run: |
           # Fail-closed disarm-and-verify, reused by the needs-human branch below (Codex P1,
           # round 3): a pending-run eviction (GitHub retains only one pending run per
@@ -148,7 +150,16 @@ jobs:
             echo "::notice::PR's base is '$current_base' (not main) as of this mutation attempt -- standing down without arming auto-merge."
             exit 0
           fi
-          gh pr merge "$PR_URL" --auto --squash
+          # --match-head-commit pins this call to the exact head fetch-metadata classified
+          # (Codex P1, round 7): this job holds the shared auto-merge-<PR> lock, but a second
+          # Dependabot push queues its OWN job in the same group and waits its turn -- by the
+          # time this run reaches this call, a newer, differently-classified revision could
+          # already be the PR's live head. Without pinning, `gh pr merge "$PR_URL"` acts on
+          # whatever the CURRENT head is, letting a stale minor/patch classification arm a
+          # revision that's actually major. If the head has moved, this fails outright rather
+          # than silently admitting the wrong revision -- the new push's own run (already
+          # queued behind this one) re-classifies and re-evaluates it correctly.
+          gh pr merge "$PR_URL" --auto --squash --match-head-commit "$HEAD_SHA"
 
       - name: Label major updates for review
         if: steps.metadata.outputs.update-type == 'version-update:semver-major'
