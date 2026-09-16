@@ -3,6 +3,12 @@ on:
   push:
     branches: [main]
   pull_request:
+  # Native merge-queue cutover: `Wiki lint` is a required check, and GitHub's merge_queue
+  # ruleset rule re-verifies every required check against the synthetic merge-group commit
+  # before actually merging -- without this trigger, `Wiki lint` could never resolve for that
+  # SHA and every queued PR would stall indefinitely.
+  merge_group:
+    types: [checks_requested]
 jobs:
   wiki-lint:
     name: Wiki lint

@@ -4,6 +4,16 @@ on:
   push:
     branches: [main]
   pull_request:
+  # Native merge-queue cutover: `test` is a required check, and GitHub's merge_queue ruleset
+  # rule re-verifies every required check against the synthetic merge-group commit before
+  # actually merging -- without this trigger, `test` could never resolve for that SHA and every
+  # queued PR would stall indefinitely. codex-clean's own `if:` below is scoped to
+  # `pull_request` only, so it reports `skipped` (not run) on a merge_group event -- test's own
+  # gate-check step already treats `skipped` as pass-through, which is correct here: the
+  # merge-group commit already passed a real Codex review during its PR phase, so there's
+  # nothing to re-review against a synthetic integration commit with no PR to comment on.
+  merge_group:
+    types: [checks_requested]
 
 # wait-for-codex.yml's own concurrency group (keyed on PR number,
 # cancel-in-progress: true) cancels an earlier push's "Wait for Codex
