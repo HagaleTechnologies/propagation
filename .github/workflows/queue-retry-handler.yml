@@ -588,6 +588,19 @@ jobs:
               fi
             fi
 
+            # Recheck the head AGAIN, immediately before pausing (Codex P1, round 6, same
+            # class of fix already applied to the handoff step above): the recheck at the top
+            # of this branch only proves the head hadn't moved before the disarm/dequeue
+            # sequence just above -- a new commit landing during those `gh api` calls would
+            # get labeled with a stale marker on a PR-wide (not SHA-scoped) label, disarming a
+            # replacement revision that may have already been legitimately re-armed by its own
+            # concurrent synchronize-triggered run.
+            current_head_sha_final=$(gh pr view "$PR" --repo "$REPO" --json headRefOid --jq .headRefOid)
+            if [ "$current_head_sha_final" != "$HEAD_SHA" ]; then
+              echo "::notice::PR #$PR's head moved from $HEAD_SHA12 to ${current_head_sha_final:0:12} during this fallback step -- standing down without pausing the replacement revision."
+              exit 0
+            fi
+
             gh label create needs-human --color d73a4a \
               --description "Needs a human decision -- an automated handler could not safely proceed" \
               --repo "$REPO" >/dev/null 2>&1 || true

@@ -52,7 +52,22 @@ jobs:
     # `edited` fires on ANY PR edit -- title, body, labels, base -- but this job
     # calls `gh pr merge --auto` unconditionally for it, which could re-arm an UNCHANGED head that
     # just failed merge-group CI for reasons having nothing to do with that edit.
+    #
+    # github.actor != 'dependabot[bot]' (Codex P1, found reviewing this PR): dependabot-auto-
+    # merge.yml now handles dependabot[bot] admission/disarm entirely inline (see that file's
+    # own header) and shares THIS job's exact concurrency group. Without this exclusion, a
+    # Dependabot opened/synchronize event queues a job here too, in the same group -- if
+    # another job is already running, GitHub's one-pending-per-group limit means one of the two
+    # can evict the other, and dependabot-auto-merge.yml's own classifier (the one that removes
+    # a stale dependabot-vetted label on reclassification) losing that race leaves this job's
+    # own defensive fallback admitting a now-major PR on a stale label with no classifier left
+    # to correct it. github.actor here reflects who performed THIS event specifically, not the
+    # PR's persistent author field -- a maintainer manually toggling dependabot-vetted on a
+    # dependabot-authored PR still has actor=that maintainer, so this exclusion does NOT block
+    # that legitimate manual-relabel case from still reaching this job's own trust
+    # re-evaluation (is_trusted_author() below still checks PR_AUTHOR, not actor).
     if: |
+      github.actor != 'dependabot[bot]' &&
       github.event.pull_request.draft == false &&
       (github.event.action != 'edited' || github.event.changes.base != null) &&
       (github.event.action != 'unlabeled' || github.event.label.name == 'needs-human' || github.event.label.name == 'dependabot-vetted') &&
