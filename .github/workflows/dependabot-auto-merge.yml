@@ -14,6 +14,16 @@ jobs:
   auto-merge:
     if: github.actor == 'dependabot[bot]'
     runs-on: ubuntu-latest
+    # Shared with auto-merge-trigger.yml's and queue-retry-handler.yml's own mutating jobs
+    # (Codex P1, round 2 of this PR): this job's inline admission/disarm steps below are real
+    # mutations of the same PR's auto-merge/queue state those other jobs also mutate -- without
+    # the shared lock, a TOCTOU race is possible (e.g. this job reads needs-human as absent and
+    # arms moments after auto-merge-trigger.yml disarmed for that exact reason).
+    # cancel-in-progress: false: a queued run must WAIT for the current holder to finish its
+    # full read-decide-act sequence, never cancel it mid-mutation.
+    concurrency:
+      group: auto-merge-${{ github.event.pull_request.number }}
+      cancel-in-progress: false
     steps:
       - name: Fetch Dependabot metadata
         id: metadata
@@ -75,7 +85,19 @@ jobs:
           PR_URL: ${{ github.event.pull_request.html_url }}
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           REPO: ${{ github.repository }}
+          PR: ${{ github.event.pull_request.number }}
         run: |
+          # needs-human check (Codex P1, round 2): a manually-applied pause must not be
+          # silently overridden by a later synchronize event that happens to re-vet the PR --
+          # this is a LIVE fetch, not the webhook-delivery-time labels snapshot, matching
+          # auto-merge-trigger.yml's own needs-human check exactly (same label, same semantics,
+          # no staleness clearing here since this path never applied needs-human itself and has
+          # no basis to judge it stale).
+          current_labels=$(gh api --paginate "repos/${REPO}/issues/${PR}/labels" --jq '.[].name')
+          if grep -qxF "needs-human" <<< "$current_labels"; then
+            echo "::notice::PR #$PR has needs-human attached -- standing down without arming auto-merge despite passing dependabot vetting."
+            exit 0
+          fi
           merge_queue_live=$(gh api "repos/${REPO}/rules/branches/main" --jq '[.[] | select(.type == "merge_queue")] | length > 0' 2>/dev/null || echo false)
           if [ "$merge_queue_live" != "true" ]; then
             echo "::notice::No merge_queue ruleset rule exists yet for main -- standing down without arming native auto-merge. Mergify's own queue is still the sole merge authority until the ruleset update lands."
@@ -130,8 +152,14 @@ jobs:
           REPO: ${{ github.repository }}
           PR: ${{ github.event.pull_request.number }}
         run: |
-          gh pr merge "$PR_URL" --disable-auto >/dev/null 2>&1 || true
+          # Fail-closed verification (Codex P1, round 2): the original version discarded
+          # --disable-auto's own failure (`|| true`) and only re-checked isInMergeQueue, not
+          # autoMergeRequest -- a transient/permission failure on the disable-auto call could
+          # leave the PR armed (not queued yet), and this step would still report success. Same
+          # verify-both-states-or-fail-closed pattern as auto-merge-trigger.yml's own
+          # still_armed_or_queued().
           OWNER_PART="${REPO%%/*}"; NAME_PART="${REPO##*/}"
+          gh pr merge "$PR_URL" --disable-auto >/dev/null 2>&1 || true
           queue_state=$(gh api graphql -f query='
             query($owner: String!, $name: String!, $pr: Int!) {
               repository(owner: $owner, name: $name) {
@@ -143,4 +171,21 @@ jobs:
           if [ "$in_queue" = "true" ] && [ -n "$pr_node_id" ] && [ "$pr_node_id" != "null" ]; then
             echo "::notice::PR #$PR is in the native merge queue -- dequeuing after reclassification to major."
             gh api graphql -f query='mutation($id: ID!) { dequeuePullRequest(input: {id: $id}) { clientMutationId } }' -f id="$pr_node_id" >/dev/null 2>&1 || true
+          fi
+
+          state=$(gh api graphql -f query='
+            query($owner: String!, $name: String!, $pr: Int!) {
+              repository(owner: $owner, name: $name) {
+                pullRequest(number: $pr) { autoMergeRequest { enabledAt } isInMergeQueue }
+              }
+            }' -f owner="$OWNER_PART" -f name="$NAME_PART" -F pr="$PR" 2>/dev/null)
+          armed=$(printf '%s' "$state" | jq -r '.data.repository.pullRequest.autoMergeRequest != null' 2>/dev/null)
+          queued=$(printf '%s' "$state" | jq -r '.data.repository.pullRequest.isInMergeQueue' 2>/dev/null)
+          if { [ "$armed" != "true" ] && [ "$armed" != "false" ]; } || { [ "$queued" != "true" ] && [ "$queued" != "false" ]; }; then
+            echo "::error::Could not confirm PR #$PR's armed/queued state after disarm/dequeue (verification query failed or returned unparseable JSON) -- treating as unsafe (fail closed)." >&2
+            exit 1
+          fi
+          if [ "$armed" = "true" ] || [ "$queued" = "true" ]; then
+            echo "::error::PR #$PR is STILL ARMED and/or still in the merge queue (armed: $armed, queued: $queued) despite the disable-auto/dequeue calls -- this needs urgent human attention: run 'gh pr merge --disable-auto' yourself and verify, or close/reopen the PR." >&2
+            exit 1
           fi
