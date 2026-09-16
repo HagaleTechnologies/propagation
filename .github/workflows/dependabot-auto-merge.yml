@@ -184,8 +184,18 @@ jobs:
       # vetted, then reclassified to major mid-queue (a grouped update's later refresh),
       # would stay armed or queued indefinitely despite no longer being trusted -- exactly the
       # security gap the continuous re-check exists to close.
+      #
+      # always() is required, not optional decoration (Codex P1, round 4): GitHub Actions
+      # applies a default guard that auto-skips a step whenever a PRIOR step in the same job
+      # failed, regardless of this step's own `if:` -- unless that `if:` includes a
+      # status-check function. The preceding "Label major updates for review" step can fail
+      # PARTIALLY (its own `gh pr edit --remove-label dependabot-vetted` call succeeds, then
+      # `gh pr comment` fails under `bash -e`, reporting the whole step as failed) -- without
+      # always() here, this disarm step would then be skipped entirely, leaving a PR that just
+      # lost its vetting label still armed or queued. Same class of bug already documented and
+      # fixed in ci.yml's own test/wiki-lint jobs.
       - name: Disarm/dequeue the reclassified PR
-        if: steps.metadata.outputs.update-type == 'version-update:semver-major'
+        if: always() && steps.metadata.outputs.update-type == 'version-update:semver-major'
         env:
           PR_URL: ${{ github.event.pull_request.html_url }}
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
