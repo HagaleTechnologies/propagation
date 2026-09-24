@@ -677,22 +677,32 @@ jobs:
           # request job's own "@codex review" and marker posts could otherwise have theirs
           # selected as "last" (still chronologically before the genuine marker), shifting
           # run_started to their forged timestamp while is_marked still matched the real
-          # marker landing within 10s after it.
+          # marker landing within the pairing window after it (see that window's own
+          # comment below for why it's 60s, not 10s).
           all_comments=$(gh api --paginate "repos/$REPO/issues/$PR/comments?per_page=100" | jq -s '[.[][]]')
           comment=$(echo "$all_comments" | jq --arg login "$TRUSTED_LOGIN" '[.[] | select(.body == "@codex review") | select($login != "" and .user.login == $login)] | sort_by(.created_at) | last')
           # A maintainer can manually type "@codex review" as a bare comment, bypassing
           # this workflow's own request job entirely -- that comment has no accompanying
           # marker (only the automated request job posts one), so counting markers alone
           # would still (wrongly) classify it as the sole/genuine request. Pair the
-          # SELECTED comment with a marker landing within 10s after it (posted back-to-back
-          # by the same automated step) -- an unmarked selected comment is conservatively
-          # NOT genuine, matching a bare manual re-request of unchanged code.
+          # SELECTED comment with a marker landing within the window after it (posted
+          # back-to-back by the same automated step) -- an unmarked selected comment is
+          # conservatively NOT genuine, matching a bare manual re-request of unchanged code.
+          #
+          # Codex P1, this PR's own round 3: this window was 10s, sized for a single
+          # unconditional POST -- but the marker POST now retries up to 3 times with a 5s
+          # sleep after each failed attempt (see "Request a review" above), so a marker
+          # that only succeeds on its second or third attempt can land 10-20+ seconds
+          # after the request comment, well past the old window, misclassifying a genuine
+          # recovery as unmarked. Widened to 60s: comfortably covers the retry's own worst
+          # case (up to ~10s of sleeping plus each attempt's own API latency) with margin,
+          # rather than a razor-thin bound tied to one specific retry count/backoff.
           if [ "$comment" != "null" ] && [ -n "$comment" ]; then
             comment_epoch=$(date -u -d "$(echo "$comment" | jq -r '.created_at')" +%s)
             is_marked=$(echo "$all_comments" | jq --arg sha "$HEAD_SHA" --arg login "$TRUSTED_LOGIN" --argjson after "$comment_epoch" '
               [.[] | select(.body == "<!-- codex-review-request head_sha=\($sha) -->")
                    | select($login != "" and .user.login == $login)
-                   | select((.created_at | fromdateiso8601) >= $after and (.created_at | fromdateiso8601) <= ($after + 10))
+                   | select((.created_at | fromdateiso8601) >= $after and (.created_at | fromdateiso8601) <= ($after + 60))
               ] | length > 0')
             echo "is_marked=$is_marked" >> "$GITHUB_OUTPUT"
           fi
@@ -799,6 +809,7 @@ jobs:
           # is paired with a marker embedding this exact HEAD_SHA, computed fresh above).
           IS_MARKED: ${{ steps.request-comment.outputs.is_marked }}
           EVENT_NAME: ${{ github.event_name }}
+          EVENT_COMMENT_CREATED_AT: ${{ github.event.comment.created_at }}
         run: |
           set -o pipefail
           # A pull_request_review_comment (a reply Codex posted INSIDE an existing review
@@ -807,13 +818,29 @@ jobs:
           # matching, and the query below only covers issue-level comments/reviews/
           # reactions anyway (review-thread replies live in a separate GraphQL shape,
           # reviewThreads, which compute-verdict below already re-reads live regardless of
-          # what triggered this run). Treating arrival of this event as sufficient,
-          # unconditional evidence that Codex just engaged with this PR routes straight
-          # into compute-verdict's own new_count/restated_count logic, which is the actual
-          # mechanism that needs to see this reply.
+          # what triggered this run).
+          #
+          # Codex P1, this PR's own round 3: unconditionally trusting arrival of THIS
+          # event type was wrong -- pr-context resolves HEAD_SHA and SINCE (RUN_STARTED)
+          # from the PR's own LIVE, CURRENT state, not from this specific event's own
+          # payload. A stale reply event for an OLD head (A) can fire its Actions run
+          # AFTER a NEWER push (B) already landed and got its own fresh request -- pr-context
+          # then captures B, but the OLD reply predates B's own RUN_STARTED, so
+          # compute-verdict's restated_by_codex check (createdAt >= $since) correctly
+          # ignores it -- yet responded=true was still set from the mere fact this run
+          # fired at all, letting the check conclude B "clean" with zero genuine evidence
+          # Codex ever looked at B. Require the event's OWN comment timestamp to be at or
+          # after SINCE before treating it as evidence for the CURRENT request -- exactly
+          # the same bar comment_head_tied/reviews already apply via their own `>= $since`
+          # filters.
           if [ "$EVENT_NAME" = "pull_request_review_comment" ]; then
-            echo "Codex posted a reply within an existing review thread -- routing to compute-verdict for a live re-evaluation."
-            echo "responded=true" >> "$GITHUB_OUTPUT"
+            if [ -n "$EVENT_COMMENT_CREATED_AT" ] && [ "$(date -u -d "$EVENT_COMMENT_CREATED_AT" +%s)" -ge "$(date -u -d "$SINCE" +%s)" ]; then
+              echo "Codex posted a reply within an existing review thread, at or after this request's own start -- routing to compute-verdict for a live re-evaluation."
+              echo "responded=true" >> "$GITHUB_OUTPUT"
+            else
+              echo "This reply ($EVENT_COMMENT_CREATED_AT) predates the current request ($SINCE) -- a newer push has already superseded it. Leaving the check in_progress for the current request's own signal."
+              echo "responded=false" >> "$GITHUB_OUTPUT"
+            fi
             exit 0
           fi
           owner="${REPO%%/*}"; name="${REPO##*/}"
