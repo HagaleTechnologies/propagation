@@ -393,14 +393,13 @@ jobs:
             echo "CODEX_REVIEW_PAT not available -- skipping the request comment. A formal Codex review tied to this head still resolves the check normally via codex-review-response, once one lands."
             exit 0
           fi
-          gh api "repos/$REPO/issues/$PR/comments" -f body="@codex review" >/dev/null
           # Request and response are DIFFERENT workflow runs (decoupled, event-driven), so
           # github.run_attempt in the response job is ALWAYS 1 for a genuinely-fired
           # response event -- it can never distinguish a real new commit from a bare
           # re-request of an UNCHANGED head_sha. That distinction has to be recorded
           # somewhere durable the response job can independently read back: a marker
           # comment counting how many times THIS EXACT head_sha has been requested. Posted
-          # as its OWN comment, not appended to the "@codex review" trigger text above, to
+          # as its OWN comment, not appended to the "@codex review" trigger text below, to
           # avoid any risk of interfering with Codex's own trigger-phrase matching.
           #
           # Only post the marker when the check-run for this head_sha was NOT already
@@ -429,20 +428,31 @@ jobs:
             echo "This head_sha's check-run was already completed before this request -- not marking this round genuine (no new commit landed)."
           else
             # Codex P1, this PR's own round 2: a bare, unguarded POST here meant a
-            # transient failure AFTER the "@codex review" comment above already succeeded
-            # left the check-run in_progress with no marker -- codex-review-response would
-            # then read IS_MARKED=false and treat a genuine remediation round as a bare
-            # rerun, failing it on any unresolved baseline concern. Worse, once that
-            # response concludes the check to "completed" (a real conclusion, not the
-            # failsafe's own placeholder this same condition already excludes above), a
-            # later rerun of THIS job can never re-post the marker either -- the head_sha
-            # now reads as already-completed, permanently trapping the PR until an actual
-            # new commit lands. Retried like every other write in this file (3 attempts,
-            # 5s backoff) to close the transient case; a loud, non-fatal warning on
+            # transient failure AFTER the "@codex review" comment already succeeded left
+            # the check-run in_progress with no marker -- codex-review-response would then
+            # read IS_MARKED=false and treat a genuine remediation round as a bare rerun,
+            # failing it on any unresolved baseline concern. Retried like every other write
+            # in this file (3 attempts, 5s backoff); a loud, non-fatal warning on
             # exhaustion, matching apply_clean_label/remove_clean_label's own established
-            # fail-loud-but-continue precedent -- failing this step outright would not
-            # actually help recovery here, since the failsafe below deliberately no-ops
-            # once a check-run already exists for this head_sha.
+            # fail-loud-but-continue precedent.
+            #
+            # Codex P1, this PR's own round 6: retrying pushed this POST's own worst-case
+            # latency well past the original 10s request/marker pairing window ("Find the
+            # most recent request comment" below) -- but the DEEPER problem the same
+            # finding surfaced is that positioning this AFTER "@codex review" created a
+            # genuine race at all: if Codex ever responded faster than this retry loop
+            # could finish, codex-review-response would read is_marked=false for a round
+            # that was, in fact, entirely genuine, with no way to repair the verdict
+            # afterward (the marker's own eventual success posts as an issue_comment
+            # authored by CODEX_REVIEW_PAT's identity, which codex-review-response's own
+            # `if:` doesn't recognize as a trigger). Moved the marker POST to happen
+            # BEFORE "@codex review" instead of after -- Codex cannot possibly reply to a
+            # trigger comment that doesn't exist yet, so by construction the marker is now
+            # guaranteed to exist (attempted, and either present or loudly logged as
+            # failed) before any real response could ever arrive, eliminating the race
+            # rather than continuing to widen a pairing window around it. The pairing
+            # window in "Find the most recent request comment" below now looks BEFORE the
+            # request comment instead of after, to match this new ordering.
             marker_posted="false"
             for _ in 1 2 3; do
               if gh api "repos/$REPO/issues/$PR/comments" -f body="<!-- codex-review-request head_sha=$HEAD_SHA -->" >/dev/null 2>/tmp/marker-post-err.log; then
@@ -452,9 +462,10 @@ jobs:
               sleep 5
             done
             if [ "$marker_posted" != "true" ]; then
-              echo "::error::Could not post the genuine-sync marker for $HEAD_SHA after 3 attempts: $(cat /tmp/marker-post-err.log 2>/dev/null) -- this round may be misclassified as a bare rerun if Codex responds before a retry succeeds." >&2
+              echo "::error::Could not post the genuine-sync marker for $HEAD_SHA after 3 attempts: $(cat /tmp/marker-post-err.log 2>/dev/null) -- this round may be misclassified as a bare rerun." >&2
             fi
           fi
+          gh api "repos/$REPO/issues/$PR/comments" -f body="@codex review" >/dev/null
 
   # ============================================================================================
   # Failsafe: codex-review-request's own steps run BEFORE create-check can ever run (app-token
@@ -674,35 +685,36 @@ jobs:
           #
           # Filtered to TRUSTED_LOGIN here too (not just the marker below): a commenter who
           # posts their own "@codex review" in the brief window between the automated
-          # request job's own "@codex review" and marker posts could otherwise have theirs
-          # selected as "last" (still chronologically before the genuine marker), shifting
+          # request job's own marker and "@codex review" posts could otherwise have theirs
+          # selected as "last" (still chronologically after the genuine marker), shifting
           # run_started to their forged timestamp while is_marked still matched the real
-          # marker landing within the pairing window after it (see that window's own
-          # comment below for why it's 60s, not 10s).
+          # marker landing within the pairing window before it.
           all_comments=$(gh api --paginate "repos/$REPO/issues/$PR/comments?per_page=100" | jq -s '[.[][]]')
           comment=$(echo "$all_comments" | jq --arg login "$TRUSTED_LOGIN" '[.[] | select(.body == "@codex review") | select($login != "" and .user.login == $login)] | sort_by(.created_at) | last')
           # A maintainer can manually type "@codex review" as a bare comment, bypassing
           # this workflow's own request job entirely -- that comment has no accompanying
           # marker (only the automated request job posts one), so counting markers alone
           # would still (wrongly) classify it as the sole/genuine request. Pair the
-          # SELECTED comment with a marker landing within the window after it (posted
-          # back-to-back by the same automated step) -- an unmarked selected comment is
-          # conservatively NOT genuine, matching a bare manual re-request of unchanged code.
+          # SELECTED comment with a marker landing within the window BEFORE it -- an
+          # unmarked selected comment is conservatively NOT genuine, matching a bare manual
+          # re-request of unchanged code.
           #
-          # Codex P1, this PR's own round 3: this window was 10s, sized for a single
-          # unconditional POST -- but the marker POST now retries up to 3 times with a 5s
-          # sleep after each failed attempt (see "Request a review" above), so a marker
-          # that only succeeds on its second or third attempt can land 10-20+ seconds
-          # after the request comment, well past the old window, misclassifying a genuine
-          # recovery as unmarked. Widened to 60s: comfortably covers the retry's own worst
-          # case (up to ~10s of sleeping plus each attempt's own API latency) with margin,
-          # rather than a razor-thin bound tied to one specific retry count/backoff.
+          # Codex P1, this PR's own round 6: the request job now posts the marker BEFORE
+          # "@codex review" (not after -- see that step's own comment for why: posting it
+          # first eliminates the race where Codex could respond faster than the marker's
+          # own retry loop could finish), so this pairing window looks BACKWARD from the
+          # selected comment instead of forward. Kept at 60s (was 10s pre-round-3, sized
+          # for a single unconditional POST) -- the marker POST retries up to 3 times with
+          # a 5s sleep after each failed attempt, so a marker that only succeeds on its
+          # second or third attempt can land well before "@codex review" actually posts;
+          # 60s comfortably covers that worst case with margin, rather than a razor-thin
+          # bound tied to one specific retry count/backoff.
           if [ "$comment" != "null" ] && [ -n "$comment" ]; then
             comment_epoch=$(date -u -d "$(echo "$comment" | jq -r '.created_at')" +%s)
-            is_marked=$(echo "$all_comments" | jq --arg sha "$HEAD_SHA" --arg login "$TRUSTED_LOGIN" --argjson after "$comment_epoch" '
+            is_marked=$(echo "$all_comments" | jq --arg sha "$HEAD_SHA" --arg login "$TRUSTED_LOGIN" --argjson before "$comment_epoch" '
               [.[] | select(.body == "<!-- codex-review-request head_sha=\($sha) -->")
                    | select($login != "" and .user.login == $login)
-                   | select((.created_at | fromdateiso8601) >= $after and (.created_at | fromdateiso8601) <= ($after + 60))
+                   | select((.created_at | fromdateiso8601) <= $before and (.created_at | fromdateiso8601) >= ($before - 60))
               ] | length > 0')
             echo "is_marked=$is_marked" >> "$GITHUB_OUTPUT"
           fi
@@ -809,91 +821,37 @@ jobs:
           # is paired with a marker embedding this exact HEAD_SHA, computed fresh above).
           IS_MARKED: ${{ steps.request-comment.outputs.is_marked }}
           EVENT_NAME: ${{ github.event_name }}
-          EVENT_COMMENT_CREATED_AT: ${{ github.event.comment.created_at }}
-          EVENT_COMMENT_NODE_ID: ${{ github.event.comment.node_id }}
         run: |
           set -o pipefail
-          # A pull_request_review_comment (a reply Codex posted INSIDE an existing review
-          # thread) is already thread-scoped by definition -- unlike a bare issue comment,
-          # there's no ambiguity to resolve via reviewed_commit_prefix/is_error_shaped
-          # matching, and the query below only covers issue-level comments/reviews/
-          # reactions anyway (review-thread replies live in a separate GraphQL shape,
-          # reviewThreads, which compute-verdict below already re-reads live regardless of
-          # what triggered this run).
+          # Codex P1/P2, this PR's own rounds 3-6: four separate attempts to make a
+          # pull_request_review_comment (a reply Codex posted INSIDE an existing review
+          # thread) an independently-trustworthy "responded=true" signal each found a new
+          # way it could be wrong -- a stale event for a superseded head (round 3), a reply
+          # in a human-started thread (round 4), an invalid GraphQL field that broke the
+          # round-4 fix outright (round 5), and a reply on an ALREADY-RESOLVED thread
+          # (round 6, since compute-verdict's own new_count/restated_count/resolvable all
+          # filter on isResolved==false, a resolved thread's reply contributes nothing
+          # either way). Every one of these is a variant of the same root problem: unlike a
+          # formal review (tied via commit.oid) or an issue comment (tied via
+          # reviewed_commit_prefix/HEAD_SHA in its own body text), a thread reply carries
+          # NO explicit head-tied signal in its own content at all -- every heuristic
+          # tried was an indirect, leaky proxy for "did Codex genuinely review the CURRENT
+          # head."
           #
-          # Codex P1, this PR's own round 3: unconditionally trusting arrival of THIS
-          # event type was wrong -- pr-context resolves HEAD_SHA and SINCE (RUN_STARTED)
-          # from the PR's own LIVE, CURRENT state, not from this specific event's own
-          # payload. A stale reply event for an OLD head (A) can fire its Actions run
-          # AFTER a NEWER push (B) already landed and got its own fresh request -- pr-context
-          # then captures B, but the OLD reply predates B's own RUN_STARTED, so
-          # compute-verdict's restated_by_codex check (createdAt >= $since) correctly
-          # ignores it -- yet responded=true was still set from the mere fact this run
-          # fired at all, letting the check conclude B "clean" with zero genuine evidence
-          # Codex ever looked at B. Require the event's OWN comment timestamp to be at or
-          # after SINCE before treating it as evidence for the CURRENT request -- exactly
-          # the same bar comment_head_tied/reviews already apply via their own `>= $since`
-          # filters.
-          #
-          # Codex P1, this PR's own round 4: a timestamp check alone still wasn't enough --
-          # Codex replying in a HUMAN-STARTED discussion thread (answering a question,
-          # unrelated to reviewing this head) is fresh and real, but compute-verdict's own
-          # new_count/restated_count only ever count CODEX-INITIATED threads, so a
-          # human-thread reply would produce new_count=0/restated_count=0 and let the check
-          # conclude "clean" with no actual review of this head ever having happened.
-          # Additionally requires the replied-to THREAD's own first comment to be
-          # Codex-authored -- a reply inside a thread Codex itself opened is real evidence
-          # it engaged with reviewing this PR (that thread's own existence implies some
-          # completed review pass), which a reply in someone else's thread is not.
+          # Redesigned rather than patched a fifth time: a pull_request_review_comment
+          # event now ALWAYS sets responded=true (unconditionally, no heuristics), but
+          # ALSO sets allow_success=false -- compute-verdict below can still FAIL the
+          # check from this trigger (a genuine new/restated concern is a genuine finding no
+          # matter how it was discovered), but can never independently CONCLUDE success or
+          # auto-resolve baseline threads from a reply alone. This single invariant
+          # subsumes every case rounds 3-6 each found a separate gap in: a stale, human's,
+          # or resolved thread's reply can never be mistaken for proof of a clean review,
+          # since success now always requires an explicit head-tied signal (a review, a
+          # tied comment, or a tied reaction) regardless of what triggered this run.
           if [ "$EVENT_NAME" = "pull_request_review_comment" ]; then
-            # Codex P2, this PR's own round 5: `PullRequestReviewComment` has no
-            # `pullRequestReviewThread` field -- that query was invalid GraphQL, silently
-            # swallowed by this call's own `|| echo "false"` fallback, so EVERY
-            # pull_request_review_comment event fell through to is_codex_thread=false and
-            # never reached compute-verdict at all. The only supported path from a single
-            # comment to its containing thread is via the PR's own reviewThreads
-            # connection -- paginate through it (matching this file's own established
-            # pattern elsewhere) and find the thread whose own comments include this
-            # event's comment id.
-            is_codex_thread="false"
-            if [ -n "$EVENT_COMMENT_NODE_ID" ]; then
-              owner="${REPO%%/*}"; name="${REPO##*/}"
-              all_thread_nodes="[]"
-              cursor="null"
-              while true; do
-                page=$(gh api graphql -f query='
-                  query($owner: String!, $name: String!, $pr: Int!, $after: String) {
-                    repository(owner: $owner, name: $name) {
-                      pullRequest(number: $pr) {
-                        reviewThreads(first: 100, after: $after) {
-                          pageInfo { hasNextPage endCursor }
-                          nodes {
-                            comments(first: 50) { nodes { id author { login } } }
-                          }
-                        }
-                      }
-                    }
-                  }' -f owner="$owner" -f name="$name" -F pr="$PR" -F after="$cursor" 2>/tmp/thread-origin-err.log)
-                all_thread_nodes=$(jq -n --argjson acc "$all_thread_nodes" --argjson new "$(echo "$page" | jq '.data.repository.pullRequest.reviewThreads.nodes // []')" '$acc + $new')
-                has_next=$(echo "$page" | jq -r '.data.repository.pullRequest.reviewThreads.pageInfo.hasNextPage // false')
-                cursor=$(echo "$page" | jq -r '.data.repository.pullRequest.reviewThreads.pageInfo.endCursor // ""')
-                [ "$has_next" = "true" ] || break
-              done
-              is_codex_thread=$(echo "$all_thread_nodes" | jq -r --arg cid "$EVENT_COMMENT_NODE_ID" '
-                [.[] | select([.comments.nodes[].id] | index($cid) != null) | .comments.nodes[0].author.login == "chatgpt-codex-connector"] | any')
-            fi
-            if [ "$is_codex_thread" != "true" ]; then
-              echo "This reply is not on a Codex-initiated thread -- not sufficient evidence Codex reviewed this head. Leaving the check in_progress for a genuine signal."
-              echo "responded=false" >> "$GITHUB_OUTPUT"
-              exit 0
-            fi
-            if [ -n "$EVENT_COMMENT_CREATED_AT" ] && [ "$(date -u -d "$EVENT_COMMENT_CREATED_AT" +%s)" -ge "$(date -u -d "$SINCE" +%s)" ]; then
-              echo "Codex posted a reply within a Codex-initiated review thread, at or after this request's own start -- routing to compute-verdict for a live re-evaluation."
-              echo "responded=true" >> "$GITHUB_OUTPUT"
-            else
-              echo "This reply ($EVENT_COMMENT_CREATED_AT) predates the current request ($SINCE) -- a newer push has already superseded it. Leaving the check in_progress for the current request's own signal."
-              echo "responded=false" >> "$GITHUB_OUTPUT"
-            fi
+            echo "Codex posted a reply within an existing review thread -- routing to compute-verdict for a live re-evaluation (can surface a genuine finding, but cannot independently conclude success)."
+            echo "responded=true" >> "$GITHUB_OUTPUT"
+            echo "allow_success=false" >> "$GITHUB_OUTPUT"
             exit 0
           fi
           owner="${REPO%%/*}"; name="${REPO##*/}"
@@ -963,6 +921,7 @@ jobs:
           if [ "$reviews" -gt 0 ] || [ "$tied_thumbsup" -gt 0 ] || [ "$comment_head_tied" -gt 0 ]; then
             echo "Codex responded on this revision: reviews=$reviews comment_thumbsup=$comment_thumbsup (tied=$tied_thumbsup, is_marked=$IS_MARKED) comment_head_tied=$comment_head_tied"
             echo "responded=true" >> "$GITHUB_OUTPUT"
+            echo "allow_success=true" >> "$GITHUB_OUTPUT"
           elif [ "$error_head_tied" -gt 0 ]; then
             echo "::error::Codex reported an error for this exact revision ($HEAD_SHA) instead of reviewing it."
             echo "responded=true" >> "$GITHUB_OUTPUT"
@@ -1020,6 +979,11 @@ jobs:
           RUN_STARTED: ${{ steps.request-comment.outputs.run_started }}
           IS_MARKED: ${{ steps.request-comment.outputs.is_marked }}
           TRUSTED_LOGIN: ${{ steps.request-comment.outputs.trusted_login }}
+          # See "Evaluate whether Codex responded" above for the full rationale -- a
+          # pull_request_review_comment-triggered run sets this false, meaning this step
+          # can still surface a genuine failure below, but must not conclude success or
+          # auto-resolve anything from a thread reply alone.
+          ALLOW_SUCCESS: ${{ steps.verdict.outputs.allow_success }}
         run: |
           set -o pipefail
           # Read back the durable marker the request job posts: if more than one
@@ -1154,6 +1118,21 @@ jobs:
             exit 0
           fi
 
+          # Everything above (new_count/restated_count/unresolved_baseline_count) is
+          # already a live, unresolved-thread-scoped check -- a genuine finding fails the
+          # gate regardless of what triggered this run. But concluding SUCCESS from here
+          # is a different claim ("Codex reviewed this head and found nothing"), which a
+          # bare thread reply alone does not prove (see "Evaluate whether Codex responded"
+          # above for the full rationale spanning rounds 3-6). Without an explicit
+          # head-tied signal backing it, leave the check exactly as-is rather than
+          # concluding anything -- no label, no auto-resolve, no check-run mutation ("Update
+          # the check-run" below is itself gated on this NOT being "inconclusive").
+          if [ "$ALLOW_SUCCESS" != "true" ]; then
+            echo "This thread reply didn't surface a new or restated concern, but nothing here independently proves Codex reviewed $HEAD_SHA -- leaving the check in_progress rather than concluding success from a reply alone."
+            echo "outcome=inconclusive" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
           apply_clean_label || true
           echo "outcome=success" >> "$GITHUB_OUTPUT"
 
@@ -1275,7 +1254,15 @@ jobs:
         # misread that as a real failure -- PATCHing the check-run to "Codex raised new
         # concerns" and removing its clean label for a head_sha nothing was actually wrong
         # with, purely because this run lost a race with a newer push.
-        if: always() && steps.head-check.outputs.stale != 'true' && steps.verdict.outputs.responded == 'true' && steps.freshness-check.outputs.stale != 'true'
+        #
+        # Also skipped when compute-verdict explicitly returned "inconclusive" (a thread
+        # reply with no independent proof of a completed review, no new/restated concern
+        # either) -- there is nothing to conclude in that case, and running conclude_check
+        # with an outcome other than "success" would wrongly PATCH the check to failure for
+        # a head nothing is actually wrong with. codex_errored bypasses this exclusion since
+        # that path never sets compute-verdict's own outcome at all (it's a genuine failure
+        # regardless).
+        if: always() && steps.head-check.outputs.stale != 'true' && steps.verdict.outputs.responded == 'true' && steps.freshness-check.outputs.stale != 'true' && (steps.verdict.outputs.codex_errored == 'true' || steps.compute-verdict.outputs.outcome != 'inconclusive')
         env:
           GH_TOKEN: ${{ steps.app-token.outputs.token }}
           REPO: ${{ github.repository }}
