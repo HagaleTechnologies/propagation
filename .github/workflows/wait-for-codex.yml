@@ -428,7 +428,32 @@ jobs:
           if [ "$PRE_EXISTING_STATUS" = "completed" ] && [ "$PRE_EXISTING_TITLE" != "Codex review request setup failed" ]; then
             echo "This head_sha's check-run was already completed before this request -- not marking this round genuine (no new commit landed)."
           else
-            gh api "repos/$REPO/issues/$PR/comments" -f body="<!-- codex-review-request head_sha=$HEAD_SHA -->" >/dev/null
+            # Codex P1, this PR's own round 2: a bare, unguarded POST here meant a
+            # transient failure AFTER the "@codex review" comment above already succeeded
+            # left the check-run in_progress with no marker -- codex-review-response would
+            # then read IS_MARKED=false and treat a genuine remediation round as a bare
+            # rerun, failing it on any unresolved baseline concern. Worse, once that
+            # response concludes the check to "completed" (a real conclusion, not the
+            # failsafe's own placeholder this same condition already excludes above), a
+            # later rerun of THIS job can never re-post the marker either -- the head_sha
+            # now reads as already-completed, permanently trapping the PR until an actual
+            # new commit lands. Retried like every other write in this file (3 attempts,
+            # 5s backoff) to close the transient case; a loud, non-fatal warning on
+            # exhaustion, matching apply_clean_label/remove_clean_label's own established
+            # fail-loud-but-continue precedent -- failing this step outright would not
+            # actually help recovery here, since the failsafe below deliberately no-ops
+            # once a check-run already exists for this head_sha.
+            marker_posted="false"
+            for _ in 1 2 3; do
+              if gh api "repos/$REPO/issues/$PR/comments" -f body="<!-- codex-review-request head_sha=$HEAD_SHA -->" >/dev/null 2>/tmp/marker-post-err.log; then
+                marker_posted="true"
+                break
+              fi
+              sleep 5
+            done
+            if [ "$marker_posted" != "true" ]; then
+              echo "::error::Could not post the genuine-sync marker for $HEAD_SHA after 3 attempts: $(cat /tmp/marker-post-err.log 2>/dev/null) -- this round may be misclassified as a bare rerun if Codex responds before a retry succeeds." >&2
+            fi
           fi
 
   # ============================================================================================
@@ -1059,6 +1084,27 @@ jobs:
 
           echo "$result" | jq -r '.resolvable[] | [.id, .path, .findingSha] | @tsv' | while IFS=$'\t' read -r thread_id path finding_sha; do
             [ -z "$thread_id" ] && continue
+            # Codex P1, this PR's own round 2: the freshness-check step above only
+            # verifies the head ONCE, right before this loop starts -- but a PR with many
+            # resolvable threads can keep this loop running for a while (each iteration
+            # does a compare-API call plus two live thread-state rechecks), and a
+            # synchronize/force-push landing mid-loop would otherwise go undetected. The
+            # per-thread live-state recheck further below verifies the THREAD's own
+            # resolved/purity/freshness state, but never re-verifies that HEAD_SHA is
+            # still the PR's actual current head -- a thread could pass every one of
+            # those checks and still get resolved with a reply claiming "Codex re-reviewed
+            # commit $HEAD_SHA" against a commit that's no longer current, potentially
+            # resolving a finding the NEW head reintroduced. Re-verified here, once per
+            # iteration; `break` (not `continue`) once detected, since every remaining
+            # thread in this same loop is equally stale from this point on -- no need to
+            # burn further API calls re-discovering the same fact per thread.
+            LIVE_HEAD_SHA=$(gh api "repos/$REPO/pulls/$PR" --jq '.head.sha' 2>/tmp/loop-freshness-err.log || echo "")
+            if [ -z "$LIVE_HEAD_SHA" ]; then
+              echo "::warning::Could not re-verify PR #$PR's live head mid-loop -- continuing with the originally captured head rather than aborting a partially-completed auto-resolve pass: $(cat /tmp/loop-freshness-err.log 2>/dev/null)"
+            elif [ "$LIVE_HEAD_SHA" != "$HEAD_SHA" ]; then
+              echo "::notice::PR #$PR's head advanced from $HEAD_SHA to $LIVE_HEAD_SHA mid-loop -- stopping auto-resolve here. Remaining threads stay unresolved for the new head's own request/response cycle to re-evaluate."
+              break
+            fi
             if [ -z "$finding_sha" ]; then
               echo "::warning::Thread $thread_id has no recorded originating commit — leaving unresolved."
               continue
