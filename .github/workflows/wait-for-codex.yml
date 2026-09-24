@@ -73,13 +73,23 @@ on:
   pull_request_target:
     types: [opened, ready_for_review, synchronize, reopened]
   # codex-review-response's own job-level `if:` already gates on pull_request_review/
-  # issue_comment from the Codex bot actor -- but without these two event types actually
-  # triggering the WORKFLOW at all, that job could never run in the first place. Every
-  # real Codex response would leave the managed check permanently in_progress until the
-  # org-wide timeout-scan backstop eventually failed it.
+  # issue_comment/pull_request_review_comment from the Codex bot actor -- but without
+  # these event types actually triggering the WORKFLOW at all, that job could never run
+  # in the first place. Every real Codex response would leave the managed check
+  # permanently in_progress until the org-wide timeout-scan backstop eventually failed it.
   pull_request_review:
     types: [submitted]
   issue_comment:
+    types: [created]
+  # Codex P2, this PR's own round 1: when Codex's response is a REPLY to an existing
+  # review thread (restating a still-live concern, rather than a new formal review or a
+  # bare issue comment), GitHub fires pull_request_review_comment, not
+  # pull_request_review or issue_comment -- this workflow never started the response job
+  # for exactly the case compute-verdict's own restated_count logic exists to catch,
+  # leaving the managed check in_progress until the org-wide timeout backstop eventually
+  # intervened. Likely a shared gap on coppa/pancetta too (their own `on:` blocks have the
+  # identical omission) -- worth checking there once confirmed fixed here.
+  pull_request_review_comment:
     types: [created]
   # merge_group: propagation's native merge-queue ruleset re-evaluates every required
   # check against a temporary merge-group SHA with no associated PR context. Handled by
@@ -533,7 +543,8 @@ jobs:
     # payload reports the [bot]-suffixed form).
     if: |
       (github.event_name == 'pull_request_review' && (github.event.review.user.login == 'chatgpt-codex-connector' || github.event.review.user.login == 'chatgpt-codex-connector[bot]')) ||
-      (github.event_name == 'issue_comment' && (github.event.comment.user.login == 'chatgpt-codex-connector' || github.event.comment.user.login == 'chatgpt-codex-connector[bot]') && github.event.issue.pull_request != null)
+      (github.event_name == 'issue_comment' && (github.event.comment.user.login == 'chatgpt-codex-connector' || github.event.comment.user.login == 'chatgpt-codex-connector[bot]') && github.event.issue.pull_request != null) ||
+      (github.event_name == 'pull_request_review_comment' && (github.event.comment.user.login == 'chatgpt-codex-connector' || github.event.comment.user.login == 'chatgpt-codex-connector[bot]'))
     runs-on: ubuntu-latest
     timeout-minutes: 10
     permissions:
@@ -566,7 +577,7 @@ jobs:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           REPO: ${{ github.repository }}
         run: |
-          if [ "${{ github.event_name }}" = "pull_request_review" ]; then
+          if [ "${{ github.event_name }}" = "pull_request_review" ] || [ "${{ github.event_name }}" = "pull_request_review_comment" ]; then
             PR="${{ github.event.pull_request.number }}"
           else
             PR="${{ github.event.issue.number }}"
@@ -590,9 +601,16 @@ jobs:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           REPO: ${{ github.repository }}
         run: |
-          # pull_request_review carries its own commit_id; issue_comment does not (a plain
-          # comment isn't tied to any specific commit by GitHub itself), so that path is
-          # checked via comment_head_tied/error_head_tied in the verdict step below instead.
+          # pull_request_review carries its own commit_id, tied to WHEN that formal review
+          # was submitted, so it's a direct staleness signal. issue_comment carries no
+          # commit_id at all (checked via comment_head_tied/error_head_tied in the verdict
+          # step below instead). pull_request_review_comment's own commit_id is anchored to
+          # the ORIGINAL commit the review thread was opened against, not necessarily the
+          # PR's current head, even for a brand-new reply -- checking it the same way as a
+          # formal review's commit_id would wrongly mark a genuinely-current reply as stale
+          # whenever its thread predates the latest push. Left unchecked here for that
+          # event type; the freshness-check step and compute-verdict's own live re-read of
+          # thread state (unaffected by anchor commit) are the correct gates for it.
           if [ "${{ github.event_name }}" = "pull_request_review" ] && \
              [ "${{ github.event.review.commit_id }}" != "${{ steps.pr-context.outputs.head_sha }}" ]; then
             echo "::notice::This review targeted ${{ github.event.review.commit_id }}, which is no longer the PR's current head (${{ steps.pr-context.outputs.head_sha }}) -- skipping as superseded."
@@ -755,8 +773,24 @@ jobs:
           # request comment. is_marked already verifies exactly that (the selected comment
           # is paired with a marker embedding this exact HEAD_SHA, computed fresh above).
           IS_MARKED: ${{ steps.request-comment.outputs.is_marked }}
+          EVENT_NAME: ${{ github.event_name }}
         run: |
           set -o pipefail
+          # A pull_request_review_comment (a reply Codex posted INSIDE an existing review
+          # thread) is already thread-scoped by definition -- unlike a bare issue comment,
+          # there's no ambiguity to resolve via reviewed_commit_prefix/is_error_shaped
+          # matching, and the query below only covers issue-level comments/reviews/
+          # reactions anyway (review-thread replies live in a separate GraphQL shape,
+          # reviewThreads, which compute-verdict below already re-reads live regardless of
+          # what triggered this run). Treating arrival of this event as sufficient,
+          # unconditional evidence that Codex just engaged with this PR routes straight
+          # into compute-verdict's own new_count/restated_count logic, which is the actual
+          # mechanism that needs to see this reply.
+          if [ "$EVENT_NAME" = "pull_request_review_comment" ]; then
+            echo "Codex posted a reply within an existing review thread -- routing to compute-verdict for a live re-evaluation."
+            echo "responded=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
           owner="${REPO%%/*}"; name="${REPO##*/}"
           HAS_COMMENT="false"
           [ -n "$COMMENT_ID" ] && HAS_COMMENT="true"
