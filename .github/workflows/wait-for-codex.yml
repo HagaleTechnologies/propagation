@@ -846,19 +846,41 @@ jobs:
           # it engaged with reviewing this PR (that thread's own existence implies some
           # completed review pass), which a reply in someone else's thread is not.
           if [ "$EVENT_NAME" = "pull_request_review_comment" ]; then
+            # Codex P2, this PR's own round 5: `PullRequestReviewComment` has no
+            # `pullRequestReviewThread` field -- that query was invalid GraphQL, silently
+            # swallowed by this call's own `|| echo "false"` fallback, so EVERY
+            # pull_request_review_comment event fell through to is_codex_thread=false and
+            # never reached compute-verdict at all. The only supported path from a single
+            # comment to its containing thread is via the PR's own reviewThreads
+            # connection -- paginate through it (matching this file's own established
+            # pattern elsewhere) and find the thread whose own comments include this
+            # event's comment id.
             is_codex_thread="false"
             if [ -n "$EVENT_COMMENT_NODE_ID" ]; then
-              is_codex_thread=$(gh api graphql -f query='
-                query($id: ID!) {
-                  node(id: $id) {
-                    ... on PullRequestReviewComment {
-                      pullRequestReviewThread {
-                        comments(first: 1) { nodes { author { login } } }
+              owner="${REPO%%/*}"; name="${REPO##*/}"
+              all_thread_nodes="[]"
+              cursor="null"
+              while true; do
+                page=$(gh api graphql -f query='
+                  query($owner: String!, $name: String!, $pr: Int!, $after: String) {
+                    repository(owner: $owner, name: $name) {
+                      pullRequest(number: $pr) {
+                        reviewThreads(first: 100, after: $after) {
+                          pageInfo { hasNextPage endCursor }
+                          nodes {
+                            comments(first: 50) { nodes { id author { login } } }
+                          }
+                        }
                       }
                     }
-                  }
-                }' -f id="$EVENT_COMMENT_NODE_ID" 2>/tmp/thread-origin-err.log \
-                | jq -r '(.data.node.pullRequestReviewThread.comments.nodes[0].author.login // "") == "chatgpt-codex-connector"' 2>/dev/null || echo "false")
+                  }' -f owner="$owner" -f name="$name" -F pr="$PR" -F after="$cursor" 2>/tmp/thread-origin-err.log)
+                all_thread_nodes=$(jq -n --argjson acc "$all_thread_nodes" --argjson new "$(echo "$page" | jq '.data.repository.pullRequest.reviewThreads.nodes // []')" '$acc + $new')
+                has_next=$(echo "$page" | jq -r '.data.repository.pullRequest.reviewThreads.pageInfo.hasNextPage // false')
+                cursor=$(echo "$page" | jq -r '.data.repository.pullRequest.reviewThreads.pageInfo.endCursor // ""')
+                [ "$has_next" = "true" ] || break
+              done
+              is_codex_thread=$(echo "$all_thread_nodes" | jq -r --arg cid "$EVENT_COMMENT_NODE_ID" '
+                [.[] | select([.comments.nodes[].id] | index($cid) != null) | .comments.nodes[0].author.login == "chatgpt-codex-connector"] | any')
             fi
             if [ "$is_codex_thread" != "true" ]; then
               echo "This reply is not on a Codex-initiated thread -- not sufficient evidence Codex reviewed this head. Leaving the check in_progress for a genuine signal."
