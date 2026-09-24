@@ -454,8 +454,9 @@ jobs:
             # window in "Find the most recent request comment" below now looks BEFORE the
             # request comment instead of after, to match this new ordering.
             marker_posted="false"
+            marker_comment_id=""
             for _ in 1 2 3; do
-              if gh api "repos/$REPO/issues/$PR/comments" -f body="<!-- codex-review-request head_sha=$HEAD_SHA -->" >/dev/null 2>/tmp/marker-post-err.log; then
+              if marker_comment_id=$(gh api "repos/$REPO/issues/$PR/comments" -f body="<!-- codex-review-request head_sha=$HEAD_SHA -->" --jq '.id' 2>/tmp/marker-post-err.log); then
                 marker_posted="true"
                 break
               fi
@@ -465,7 +466,32 @@ jobs:
               echo "::error::Could not post the genuine-sync marker for $HEAD_SHA after 3 attempts: $(cat /tmp/marker-post-err.log 2>/dev/null) -- this round may be misclassified as a bare rerun." >&2
             fi
           fi
-          gh api "repos/$REPO/issues/$PR/comments" -f body="@codex review" >/dev/null
+          # Codex P1, this PR's own round 7: the mirror image of round 6's own fix -- if
+          # THIS post fails after the marker above already succeeded, the marker is
+          # orphaned with no matching trigger comment, and a future retry of this job would
+          # post a SECOND marker for the same head_sha (PRE_EXISTING_STATUS is still not
+          # "completed"), pushing marker_count past 1 and misclassifying a genuinely fresh
+          # round as a rerun. Retried the same way as the marker; if it still fails, the
+          # orphaned marker is deleted (best-effort) rather than left behind to corrupt
+          # this head_sha's round classification on a later retry.
+          request_posted="false"
+          for _ in 1 2 3; do
+            if gh api "repos/$REPO/issues/$PR/comments" -f body="@codex review" >/dev/null 2>/tmp/request-post-err.log; then
+              request_posted="true"
+              break
+            fi
+            sleep 5
+          done
+          if [ "$request_posted" != "true" ]; then
+            echo "::error::Could not post the '@codex review' request comment after 3 attempts: $(cat /tmp/request-post-err.log 2>/dev/null)" >&2
+            if [ -n "${marker_comment_id:-}" ]; then
+              if gh api -X DELETE "repos/$REPO/issues/comments/$marker_comment_id" >/dev/null 2>/tmp/marker-rollback-err.log; then
+                echo "::notice::Rolled back the orphaned marker (comment $marker_comment_id) since the request itself never posted."
+              else
+                echo "::warning::Could not roll back orphaned marker comment $marker_comment_id: $(cat /tmp/marker-rollback-err.log 2>/dev/null) -- a later retry may double-count this head_sha's markers." >&2
+              fi
+            fi
+          fi
 
   # ============================================================================================
   # Failsafe: codex-review-request's own steps run BEFORE create-check can ever run (app-token
