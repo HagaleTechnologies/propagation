@@ -1,0 +1,35 @@
+#:schema https://staging.catalystcloud.dev/schemas/catalyst.schema.json
+
+[project]
+linear_team = "PRO"
+
+# Mirrors .github/workflows/ci.yml (the test job). CI builds and tests with no
+# environment variables, so none are declared. The vendored ITURHFProp build
+# needs only a C compiler and libm, which the runner image already provides.
+
+[[environment.toolchains]]
+name = "python"
+version = "3.12"
+
+# CI uses astral-sh/setup-uv; install uv with pip when the image lacks it.
+[[environment.setup]]
+name = "ensure-uv"
+run = ["sh", "-lc", "command -v uv >/dev/null 2>&1 || pip install uv"]
+
+[[environment.setup]]
+name = "install-dependencies"
+run = ["uv", "sync"]
+
+[[environment.setup]]
+name = "build-iturhfprop"
+run = ["uv", "run", "build-p533"]
+
+[[environment.verify]]
+name = "ruff"
+run = ["uv", "run", "ruff", "check", "."]
+timeout_seconds = 600
+
+[[environment.verify]]
+name = "pytest"
+run = ["uv", "run", "pytest", "-q"]
+timeout_seconds = 1800
