@@ -72,6 +72,10 @@ jobs:
       (github.event.action != 'edited' || github.event.changes.base != null) &&
       (github.event.action != 'unlabeled' || github.event.label.name == 'needs-human' || github.event.label.name == 'dependabot-vetted') &&
       (github.event.action != 'labeled' || github.event.label.name == 'needs-human' || github.event.label.name == 'dependabot-vetted')
+    # Q-0068: CODEX_REVIEW_PAT lives in the main-only codex-review environment.
+    environment:
+      name: codex-review
+      deployment: false
     runs-on: ubuntu-latest
     # Shared with queue-retry-handler.yml's own mutating job (another proven fix from this
     # fleet's own rollout) -- closes a real TOCTOU race where this job could read needs-human as absent and merge moments
