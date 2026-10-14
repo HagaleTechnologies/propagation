@@ -223,6 +223,10 @@ jobs:
     needs: [parse-pr-number, check-pr-state]
     # No `if:` needed here -- a skipped `needs` job propagates to this job as skipped too,
     # GitHub Actions' documented default for a job whose `needs` did not run.
+    # Q-0068: CODEX_REVIEW_PAT lives in the main-only codex-review environment.
+    environment:
+      name: codex-review
+      deployment: false
     runs-on: ubuntu-latest
     timeout-minutes: 5
     # `auto-merge-<PR#>`, shared with auto-merge-trigger.yml's own job: a GitHub Actions

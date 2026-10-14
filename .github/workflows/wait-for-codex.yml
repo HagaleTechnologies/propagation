@@ -72,24 +72,12 @@ on:
   # already made this same choice for the same reason.
   pull_request_target:
     types: [opened, ready_for_review, synchronize, reopened]
-  # codex-review-response's own job-level `if:` already gates on pull_request_review/
-  # issue_comment/pull_request_review_comment from the Codex bot actor -- but without
-  # these event types actually triggering the WORKFLOW at all, that job could never run
-  # in the first place. Every real Codex response would leave the managed check
-  # permanently in_progress until the org-wide timeout-scan backstop eventually failed it.
-  pull_request_review:
-    types: [submitted]
+  # Dispensa Q-0068: pull_request_review and pull_request_review_comment are gone. Both run at
+  # the PR's merge ref, which the main-only codex-review environment (where CODEX_REVIEW_PAT and
+  # HAGALE_AGENT_APP_PRIVATE_KEY now live) rejects. A Codex findings review now leaves the gate
+  # pending, which still blocks merge; Catalyst remediates on the non-clean review itself, the
+  # clean verdict arrives on issue_comment, and credenza's timeout scan fails an abandoned PR.
   issue_comment:
-    types: [created]
-  # Codex P2, this PR's own round 1: when Codex's response is a REPLY to an existing
-  # review thread (restating a still-live concern, rather than a new formal review or a
-  # bare issue comment), GitHub fires pull_request_review_comment, not
-  # pull_request_review or issue_comment -- this workflow never started the response job
-  # for exactly the case compute-verdict's own restated_count logic exists to catch,
-  # leaving the managed check in_progress until the org-wide timeout backstop eventually
-  # intervened. Likely a shared gap on coppa/pancetta too (their own `on:` blocks have the
-  # identical omission) -- worth checking there once confirmed fixed here.
-  pull_request_review_comment:
     types: [created]
   # merge_group: propagation's native merge-queue ruleset re-evaluates every required
   # check against a temporary merge-group SHA with no associated PR context. Handled by
@@ -144,6 +132,12 @@ jobs:
     # access.
     name: Codex review request (producer)
     if: github.event_name == 'merge_group' || (github.event_name == 'pull_request_target' && github.event.pull_request.draft == false && github.actor != 'dependabot[bot]')
+    # Q-0068: pull_request_target runs at main, so it reads the secrets from the main-only
+    # codex-review environment. merge_group runs at a queue ref the environment rejects, so it
+    # declares none (an empty name is none) and still reads the org-level app key.
+    environment:
+      name: ${{ github.event_name == 'pull_request_target' && 'codex-review' || '' }}
+      deployment: false
     runs-on: ubuntu-latest
     timeout-minutes: 5
     permissions:
@@ -510,6 +504,10 @@ jobs:
     # machinery as pull_request_target to publish the required check, so a transient
     # App/API failure on a merge_group run needs the identical recovery path.
     if: always() && needs.codex-review-request.result == 'failure' && (github.event_name == 'pull_request_target' || github.event_name == 'merge_group')
+    # Q-0068: same split as codex-review-request -- environment on pull_request_target only.
+    environment:
+      name: ${{ github.event_name == 'pull_request_target' && 'codex-review' || '' }}
+      deployment: false
     runs-on: ubuntu-latest
     timeout-minutes: 2
     permissions:
@@ -586,9 +584,9 @@ jobs:
           JSON
 
   # ============================================================================================
-  # Consumer half: fires once per Codex reply (pull_request_review or issue_comment from
-  # Codex's own actor), never on a poll interval. Re-derives everything it needs from live
-  # GitHub data using timestamp comparison against the request comment's own creation time --
+  # Consumer half: fires once per Codex reply (issue_comment from Codex's own actor; the
+  # pull_request_review(_comment) triggers were dropped for Q-0068), never on a poll
+  # interval. Re-derives everything it needs from live GitHub data using timestamp comparison against the request comment's own creation time --
   # no cross-invocation state beyond the marker comments and the check-run's own status.
   #
   # This job's own signal-detection logic (comment_head_tied / error_head_tied /
@@ -604,9 +602,11 @@ jobs:
     # author.login -- these two APIs disagree on bot-actor login formatting (the webhook
     # payload reports the [bot]-suffixed form).
     if: |
-      (github.event_name == 'pull_request_review' && (github.event.review.user.login == 'chatgpt-codex-connector' || github.event.review.user.login == 'chatgpt-codex-connector[bot]')) ||
-      (github.event_name == 'issue_comment' && (github.event.comment.user.login == 'chatgpt-codex-connector' || github.event.comment.user.login == 'chatgpt-codex-connector[bot]') && github.event.issue.pull_request != null) ||
-      (github.event_name == 'pull_request_review_comment' && (github.event.comment.user.login == 'chatgpt-codex-connector' || github.event.comment.user.login == 'chatgpt-codex-connector[bot]'))
+      github.event_name == 'issue_comment' && (github.event.comment.user.login == 'chatgpt-codex-connector' || github.event.comment.user.login == 'chatgpt-codex-connector[bot]') && github.event.issue.pull_request != null
+    # Q-0068: secrets come from the main-only codex-review environment (issue_comment runs at main).
+    environment:
+      name: codex-review
+      deployment: false
     runs-on: ubuntu-latest
     timeout-minutes: 10
     permissions:
