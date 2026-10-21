@@ -84,11 +84,23 @@ jobs:
         env:
           PR_URL: ${{ github.event.pull_request.html_url }}
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          ARM_TOKEN: ${{ secrets.DEPENDABOT_APPROVE_PAT }}
           REPO: ${{ github.repository }}
           PR: ${{ github.event.pull_request.number }}
           # The head fetch-metadata actually classified -- see --match-head-commit below.
           HEAD_SHA: ${{ github.event.pull_request.head.sha }}
         run: |
+          # HAG-110: arm with DEPENDABOT_APPROVE_PAT (a real user), not GITHUB_TOKEN. GitHub never
+          # enqueues a PR whose auto-merge was enabled by github-actions[bot]: 9 of 9 such PRs
+          # (2026-10-10..20) and 8 of 8 before that needed a manual or sweeper enqueue. Fall back to
+          # GITHUB_TOKEN only when the PAT is missing or refused, and say so (the sweeper then enqueues).
+          arm_auto_merge() {
+            if [ -n "${ARM_TOKEN:-}" ] && GH_TOKEN="$ARM_TOKEN" gh pr merge "$@"; then
+              return 0
+            fi
+            echo "::warning::Could not arm auto-merge with DEPENDABOT_APPROVE_PAT; falling back to GITHUB_TOKEN, which the merge queue never acts on (HAG-110). The merge-queue sweeper will enqueue this PR."
+            gh pr merge "$@"
+          }
           # Fail-closed disarm-and-verify, reused by the needs-human branch below (Codex P1,
           # round 3): a pending-run eviction (GitHub retains only one pending run per
           # concurrency group) can replace the labeled event's own disarm run before it
@@ -207,7 +219,7 @@ jobs:
           # revision that's actually major. If the head has moved, this fails outright rather
           # than silently admitting the wrong revision -- the new push's own run (already
           # queued behind this one) re-classifies and re-evaluates it correctly.
-          gh pr merge "$PR_URL" --auto --squash --match-head-commit "$HEAD_SHA"
+          arm_auto_merge "$PR_URL" --auto --squash --match-head-commit "$HEAD_SHA"
 
       - name: Label major updates for review
         if: steps.metadata.outputs.update-type == 'version-update:semver-major'
