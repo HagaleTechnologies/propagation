@@ -23,6 +23,7 @@ build-p533 = "propagation.models.p533_build:main"
 [dependency-groups]
 dev = [
     "pytest>=8.0",
+    "pyyaml>=6.0",
     "ruff>=0.6",
 ]
 
