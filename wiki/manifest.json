@@ -1,6 +1,6 @@
 {
-  "generated_at": "2026-07-23T02:44:09Z",
-  "head_commit": "808948a",
+  "generated_at": "2026-10-23T04:30:27Z",
+  "head_commit": "d2ecab3",
   "pages": [
     {
       "hash": "sha256:eebe8dc967e6a0c6fc179da2849d4275b78f6fbd4c785034ffcdf62b5c3545e1",
@@ -236,6 +236,27 @@
       "title": "What will bite you about the QA diurnal-ratio checks (1 and 2)?",
       "verified_commit": "5f75677",
       "verified_date": "2026-07-14",
+      "visibility": "private"
+    },
+    {
+      "hash": "sha256:5f52e40189d87fa6ab1b2e792b7f6837c8e8442a4a4ebd509ecfafa562762602",
+      "id": "gotcha-serena-and-thoughts-tooling",
+      "kind": "gotcha",
+      "links": [
+        "overview"
+      ],
+      "locked": false,
+      "maintainer": "agent",
+      "path": "pages/gotcha-serena-and-thoughts-tooling.md",
+      "sources": [
+        ".serena/project.yml",
+        "tests/test_serena_project_config.py",
+        ".gitignore"
+      ],
+      "status": "current",
+      "title": "What will bite you about Serena symbol search and thoughts docs?",
+      "verified_commit": "5a84c96",
+      "verified_date": "2026-10-23",
       "visibility": "private"
     },
     {

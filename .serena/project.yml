@@ -1,0 +1,142 @@
+# Serena project config for `propagation` (PRO-13).
+#
+# Field list taken from Serena 2.0.0.dev0 (pinned install of
+# oraios/serena@1de556f71569f3acfc0743e526dd60aca40a545e), introspected via
+# dataclasses.fields(ProjectConfig) on 2026-10-23: 25 public fields, of which
+# only `project_name` and `language_servers` lack defaults. Every public field
+# is spelled out below ON PURPOSE: Serena rewrites this file in place whenever
+# any field is missing OR carries a pre-2.0 name (`languages:` -> `language_servers:`,
+# `additional_workspace_folders:` -> `ls_additional_workspace_folders:`), and the
+# rewrite silently deletes hand-written comments like these ones. Symptom if a
+# future Serena version adds fields: this file's md5 changes and the comments
+# disappear after an ordinary `serena project index .` / activation. That is the
+# signal to re-diff against this version's field list, not to re-type the file.
+# Verified stable across an index pass on 2.0.0.dev0 (md5 unchanged) on 2026-10-23.
+project_name: "propagation"
+
+# Python only. This repo is 88 tracked .py files (src/propagation, tests/, scripts/,
+# baselines/p533) and no first-class source in any other language. The vendored
+# ITURHFProp C/Fortran tree under baselines/p533/upstream is not a Python source
+# tree and is excluded via ignored_paths below. `python` maps to Pyright
+# (solidlsp/ls_config.py: PYTHON = "python"; PyrightServer, pyright 1.1.403,
+# acquired at activation time via `uvx pyright-langserver`), so activation needs
+# uv/uvx on PATH and network on first run; Node is not needed for this repo
+# (pyright's Node runtime is fetched by the uvx-installed wheel wrapper).
+language_servers:
+- python
+
+# the encoding used by text files in the project
+encoding: "utf-8"
+
+# optional shell command to run before the language backend is initialised.
+# Deliberately empty: this is a shell command Serena runs on activation, and this
+# repo needs no pre-activation build for symbol search (ITURHFProp's build-p533 is
+# a test/eval dependency, not a navigation one).
+activation_command:
+
+# maximum time in seconds to wait for activation_command (default 180s)
+activation_command_timeout: 180
+
+# line ending convention when writing source files (unset = use global setting)
+line_ending:
+
+# language backend (unset = use global setting; LSP is the default)
+language_backend:
+
+# how the agent accesses Serena (unset = use global setting)
+agent_interface:
+
+# whether to use the project's .gitignore files to ignore files.
+# True: .gitignore already covers /data/, /reports/, .venv/, __pycache__/,
+# .pytest_cache/, .ruff_cache/, .worktrees/ and the thoughts/ symlink, so those
+# are never duplicated in ignored_paths below.
+ignore_all_files_in_gitignore: true
+
+# language server-specific options (none needed for pyright defaults)
+ls_specific_settings: {}
+
+# workspace folders to index (default: the whole repo)
+ls_workspace_folders: ["."]
+
+# additional workspace folders for cross-package reference support (none)
+ls_additional_workspace_folders: []
+
+# additional ignored paths, on top of .gitignore (see ignore_all_files_in_gitignore).
+# - .serena/cache is Serena's own symbol-index cache: created at activation, never
+#   committed, and NOT covered by any existing ignore rule before this change.
+# - baselines/p533/upstream is the vendored ITU ITURHFProp source (135 MB, 128 files
+#   of C/Fortran + docs, tracked in git). It has zero Python symbols; ruff already
+#   excludes the same tree ([tool.ruff] extend-exclude in pyproject.toml).
+# - thoughts is the gitignored symlink to the shared thoughts pool (see .gitignore);
+#   listed explicitly because symlink handling in gitignore-based walkers is not uniform.
+ignored_paths:
+- ".serena/cache"
+- "baselines/p533/upstream"
+- "thoughts"
+
+# navigation only: the consumers of this config (catalyst-dev codebase-analyzer,
+# codebase-locator, codebase-pattern-finder subagents) hold only Serena navigation
+# tools, so read_only costs nothing and bars symbol mutation outside the normal
+# Edit-tool review path.
+read_only: true
+
+# no tool-set customization
+excluded_tools: []
+included_optional_tools: []
+fixed_tools: []
+
+# no REPL API customization
+excluded_apis: []
+included_apis: []
+
+# no mode overrides
+default_modes:
+added_modes:
+
+# initial prompt given to the LLM on activation. Points at the repo's own canon
+# rather than restating it (the wiki points, it never restates).
+initial_prompt: |
+  propagation: ML-based HF propagation nowcasting. Train on real amateur-radio
+  path reports (WSPRnet, RBN, PSKReporter) to predict HF band openings, and
+  benchmark against the vendored ITU-R P.533/ITURHFProp baseline. The novel
+  methodological contribution is monitor-normalized negative sampling, which
+  handles observation bias (a spot proves a path was open; its absence proves
+  almost nothing).
+
+  Read CLAUDE.md first. Its "Documents (read in this order)" section is the
+  canon: README.md (thesis, licensing, open/closed boundary), ARCHITECTURE.md
+  (task formulation, data pipeline, features, modeling ladder, evaluation),
+  docs/SPEC-labeling.md (the precise labeling methodology), the versioned public
+  contract contracts/prediction-surface.v1.schema.json with
+  docs/SPEC-contract-notes.md, and ROADMAP.md (milestones M0-M4 and acceptance
+  gates). CLAUDE.md's separate "Knowledge wiki" section points at wiki/INDEX.md
+  (accumulated gotchas/decisions; read the pages relevant to your task).
+
+  Hard boundary: this repo must stay reproducible from PUBLIC data. Never import
+  or reference cqdx code -- the private cqdx R2 spot archive is an optional
+  extractor behind a pluggable interface, an accelerant, never a dependency.
+  The JSON contract in contracts/ is the only cqdx integration surface.
+
+  Layout: src/propagation/ is the package -- data/ (extractors: wsprnet, rbn,
+  pskreporter, spaceweather; dedup, geo, hygiene, lake, schema), features/
+  (universe, labels, sampling, uptime, matrix, solar/spaceweather, geometry,
+  history), models/ (climatology, gbt = LightGBM + isotonic calibration, p533
+  + p533_build for the vendored baseline), eval/ (metrics, splits = blocked
+  time-series CV, stratify = storm/quiet windows, report), qa/ (physics-grounded
+  checks). tests/ mirrors that layout. scripts/ holds entry points
+  (run_m0.py, eval_m1.py..eval_m3.py, run_pskreporter_accumulator.py and
+  others) -- operational tooling, not library code.
+  baselines/p533/upstream is the vendored ITURHFProp C/Fortran tree: read-only
+  upstream, never edited, excluded from this index.
+
+  Stack: Python 3.11+/uv, DuckDB + Parquet (partitioned band=/date=), LightGBM,
+  pytest + ruff. Prefer Serena's get_symbols_overview / find_symbol /
+  find_referencing_symbols over raw grep for symbol-level questions; call
+  read_memory("codebase_map") for the directory map.
+
+# time budget (seconds) per tool call for extra symbol info (unset = global default)
+symbol_info_budget:
+
+# memory patterns (none)
+read_only_memory_patterns: []
+ignored_memory_patterns: []
