@@ -44,7 +44,13 @@ on:
 permissions:
   contents: write
   pull-requests: write
-  issues: read
+  # Issues:write for the stale-needs-human clear (gh api --method DELETE
+  # .../issues/$PR/labels/needs-human), which runs on github.token for
+  # dependabot[bot]-authored PRs. GitHub documents that endpoint as also
+  # accepting Pull requests:write, but the call's `|| true` would hide a 403
+  # and leave the PR unarmed, so grant the Issues scope explicitly -- as
+  # dependabot-auto-merge.yml does for its copy of the same clearing code.
+  issues: write
 
 jobs:
   auto-merge:
