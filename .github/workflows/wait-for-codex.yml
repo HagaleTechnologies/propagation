@@ -123,14 +123,17 @@ jobs:
     # on every path this job handles, rather than depending on native job-skip/job-success
     # attribution. merge_group is not handled here (see codex-review-merge-group-passthrough).
     #
-    # Dependabot is excluded at the JOB level (not routed through the explicit-upsert
-    # path) -- GitHub withholds Actions secrets for Dependabot-triggered
-    # pull_request_target events, so the App-token mint step below would fail before ever
-    # reaching a Dependabot success branch (pancetta's own round-8/14/15 saga; propagation's
-    # own OLD file already excluded Dependabot at this same job level for this same
-    # documented reason, so this is a straight continuation, not a new decision).
+    # PRO-18: Dependabot runs this job and takes create-check's explicit-upsert pass-through
+    # (IS_DEPENDABOT), like the bootstrap and already-labeled paths. It used to be excluded
+    # here on the premise that GitHub withholds Actions secrets from Dependabot-triggered
+    # pull_request_target runs. That holds for pull_request, not pull_request_target: PR #73's
+    # Dependabot Auto-Merge run (39243326930) logged "Secret source: Actions", and coppa's
+    # equivalent producer, in its own main-only codex-review environment, minted hagale-agent
+    # and published this check for Dependabot PRs coppa#147/#148 (runs 40302227401,
+    # 40302291006). Since #70 named this job apart from the required check, the job-level
+    # skip left Dependabot PRs with no gate check at all.
     name: Codex review request (producer)
-    if: github.event_name == 'pull_request_target' && github.event.pull_request.draft == false && github.actor != 'dependabot[bot]'
+    if: github.event_name == 'pull_request_target' && github.event.pull_request.draft == false
     # Q-0068: secrets come from the main-only codex-review environment (pull_request_target
     # runs at main).
     environment:
@@ -262,6 +265,11 @@ jobs:
           RUN_ID: ${{ github.run_id }}
           ALREADY_CLEAN: ${{ steps.existing-label.outputs.already_clean || 'false' }}
           BOOTSTRAP_STATUS: ${{ steps.bootstrap-check.outputs.bootstrap_status || 'absent' }}
+          # PRO-18: a Dependabot update is opened by dependabot[bot] from a branch in this repo,
+          # and this event came from dependabot[bot]. A human push to a Dependabot branch (or
+          # a dependabot[bot] event on anyone else's PR) still gets a real Codex round. Same
+          # expression as manta's MAN-245 hardening.
+          IS_DEPENDABOT: ${{ github.actor == 'dependabot[bot]' && github.event.pull_request.user.login == 'dependabot[bot]' && github.event.pull_request.head.repo.full_name == github.repository }}
         run: |
           set -o pipefail
 
@@ -320,14 +328,17 @@ jobs:
             fi
           }
 
-          # Bootstrap not live yet, OR the label already exists: pass through
-          # immediately with a completed, successful check-run. Dependabot never reaches
-          # this step at all -- excluded at the job level (see the job's own header
-          # comment), since GitHub withholds secrets from Dependabot-triggered runs and this
-          # step needs the minted App token.
+          # Bootstrap not live yet, OR the label already exists, OR a Dependabot update:
+          # pass through immediately with a completed, successful check-run. Dependabot
+          # updates get no Codex round (the pre-#70 policy); dependabot-auto-merge.yml
+          # approves them and ci.yml's test runs them. No codex-clean label is applied, which
+          # is why ci.yml's codex-clean job still skips dependabot[bot].
           if [ "$BOOTSTRAP_STATUS" != "ready" ]; then
             conclusion="success"
           elif [ "$ALREADY_CLEAN" = "true" ]; then
+            conclusion="success"
+          elif [ "$IS_DEPENDABOT" = "true" ]; then
+            echo "Dependabot update -- passing through without a Codex round."
             conclusion="success"
           else
             conclusion=""
