@@ -1,6 +1,6 @@
 {
-  "generated_at": "2026-10-23T04:30:27Z",
-  "head_commit": "d2ecab3",
+  "generated_at": "2026-11-01T12:49:42Z",
+  "head_commit": "5fda098",
   "pages": [
     {
       "hash": "sha256:eebe8dc967e6a0c6fc179da2849d4275b78f6fbd4c785034ffcdf62b5c3545e1",
@@ -109,6 +109,27 @@
       "title": "Why is the prediction surface columnar and integer-quantized?",
       "verified_commit": "5c2dac7",
       "verified_date": "2026-07-07",
+      "visibility": "private"
+    },
+    {
+      "hash": "sha256:b3f0ebdcf7bac28619ce96b4c02c5690126a8ac14397b48e21e4f83b92fbe0fe",
+      "id": "gotcha-codex-gate-and-dependabot",
+      "kind": "gotcha",
+      "links": [
+        "overview"
+      ],
+      "locked": false,
+      "maintainer": "agent",
+      "path": "pages/gotcha-codex-gate-and-dependabot.md",
+      "sources": [
+        ".github/workflows/wait-for-codex.yml",
+        ".github/workflows/ci.yml",
+        "tests/test_wait_for_codex_dependabot.py"
+      ],
+      "status": "current",
+      "title": "What will bite you about the Codex gate and Dependabot PRs?",
+      "verified_commit": "11a3818",
+      "verified_date": "2026-11-01",
       "visibility": "private"
     },
     {

@@ -76,9 +76,10 @@ jobs:
       contents: read
       pull-requests: read
       issues: read
-    # dependabot[bot] and draft-PR exclusion mirrors wait-for-codex.yml's
-    # own eligibility check -- belt-and-suspenders against that
-    # producer-side skip ever drifting from this consumer-side one.
+    # dependabot[bot] and draft PRs never get a codex-clean label:
+    # wait-for-codex.yml skips drafts and passes Dependabot updates straight
+    # through with a success check-run and no label (PRO-18). Polling here
+    # would wait out the full timeout on a Dependabot rebase.
     if: github.event_name == 'pull_request' && github.actor != 'dependabot[bot]' && github.event.pull_request.draft == false
     steps:
       - name: "Bootstrap check: does the base branch's wait-for-codex.yml have the codex-clean label mechanism yet?"
