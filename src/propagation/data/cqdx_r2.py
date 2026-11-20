@@ -171,13 +171,12 @@ def parse_archive_payload(payload: dict) -> tuple[dict | None, str | None]:
     return row, None
 
 
-def parse_archive_object(data: bytes) -> ArchiveDayParseResult:
+def iter_archive_rows(data: bytes, rejection_counts: dict[str, int]) -> Iterator[dict]:
     """Decode one `raw/.../{ulid}.ndjson.gz` object body: gzip NDJSON,
     decoded one NDJSON line at a time. Malformed JSON lines
     and non-admitted payload sources count as rejections; a gzip integrity
     failure raises (the caller aborts the whole extraction -- a truncated
     object must never publish a silently-partial day)."""
-    result = ArchiveDayParseResult()
     with gzip.GzipFile(fileobj=io.BytesIO(data)) as gz:
         for line in gz:  # decoded one NDJSON line at a time, never buffered whole
             if not line.strip():
@@ -185,17 +184,20 @@ def parse_archive_object(data: bytes) -> ArchiveDayParseResult:
             try:
                 payload = json.loads(line)
             except (json.JSONDecodeError, UnicodeDecodeError):
-                result.rejection_counts["malformed_json"] = (
-                    result.rejection_counts.get("malformed_json", 0) + 1
-                )
+                rejection_counts["malformed_json"] = rejection_counts.get("malformed_json", 0) + 1
                 continue
             row, reason = parse_archive_payload(payload)
             if row is None:
-                result.rejection_counts[reason or "unknown"] = (
-                    result.rejection_counts.get(reason or "unknown", 0) + 1
-                )
+                reason = reason or "unknown"
+                rejection_counts[reason] = rejection_counts.get(reason, 0) + 1
                 continue
-            result.rows.append(row)
+            yield row
+
+
+def parse_archive_object(data: bytes) -> ArchiveDayParseResult:
+    """Collect one object's parsed rows and rejection counts."""
+    result = ArchiveDayParseResult()
+    result.rows.extend(iter_archive_rows(data, result.rejection_counts))
     return result
 
 

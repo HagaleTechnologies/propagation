@@ -18,6 +18,7 @@ AWS_SESSION_TOKEN in the environment (a session token is mandatory: these
 are temporary scoped credentials, never long-lived keys). See
 docs/cqdx-backfill.md for the owner-side provisioning story.
 """
+
 from __future__ import annotations
 
 import argparse
@@ -26,19 +27,23 @@ import os
 import re
 import shutil
 import sys
+import tempfile
 import zlib
 from pathlib import Path
 from typing import Callable
 
+import duckdb
+import polars as pl
+
 from propagation.data.cqdx_r2 import (
     archive_rows_to_frame,
+    iter_archive_rows,
     iter_requested_days,
-    parse_archive_object,
 )
-from propagation.data.dedup import dedup_spots
 
 CQDX_BUCKET = "cqdx-archive"
 R2_REGION = "auto"
+_BATCH_SIZE = 200_000
 
 _ACCOUNT_ID_RE = re.compile(r"^[0-9a-f]{32}$")
 # ULID alphabet: Crockford base32, which excludes I, L, O and U.
@@ -131,6 +136,56 @@ def _get_object(client, key: str) -> bytes:
         raise ArchiveAccessError(str(exc)) from exc
 
 
+def _write_archive_day(
+    client, keys: list[str], day_path: Path, rejection_counts: dict[str, int]
+) -> int:
+    with tempfile.TemporaryDirectory(dir=day_path.parent) as tmp:
+        batch_dir = Path(tmp)
+        rows: list[dict] = []
+        batches: list[str] = []
+
+        def flush() -> None:
+            batch = batch_dir / f"batch-{len(batches):06d}.parquet"
+            archive_rows_to_frame(rows).write_parquet(batch)
+            batches.append(str(batch))
+            rows.clear()
+
+        for key in keys:
+            for row in iter_archive_rows(_get_object(client, key), rejection_counts):
+                rows.append(row)
+                if len(rows) >= _BATCH_SIZE:
+                    flush()
+        if rows:
+            flush()
+        if not batches:
+            return 0
+
+        # All rows have cqdx priority. Apply the shared dedup key and
+        # tie-breakers across batches, with disk spill under staging.
+        with duckdb.connect(
+            config={
+                "memory_limit": "256MB",
+                "threads": 2,
+                "temp_directory": str(batch_dir / "spill"),
+            }
+        ) as conn:
+            daily = conn.sql(
+                """
+                SELECT * FROM read_parquet(?)
+                QUALIFY row_number() OVER (
+                    PARTITION BY dx_call, de_call, band, mode,
+                        time_bucket(INTERVAL '15 minutes', ts)
+                    ORDER BY snr_db DESC NULLS LAST, ts
+                ) = 1
+                ORDER BY ts
+                """,
+                params=[batches],
+            )
+            daily.write_parquet(str(day_path), compression="zstd")
+            (count,) = conn.read_parquet(str(day_path)).aggregate("count(*)").fetchone()
+        return count
+
+
 def run_backfill(
     account_id: str,
     start_date: dt.date,
@@ -191,40 +246,34 @@ def run_backfill(
     total_rows = 0
     n_days = 0
     n_objects = 0
-    n_rejected = 0
     rejection_totals: dict[str, int] = {}
     try:
         staging.mkdir(parents=True, exist_ok=True)
         for day in iter_requested_days(start_date, end_date):
             keys = _list_day_keys(client, day)
-            day_rows: list[dict] = []
-            for key in keys:
-                body = _get_object(client, key)
-                n_objects += 1
-                parsed = parse_archive_object(body)
-                day_rows.extend(parsed.rows)
-                n_rejected += sum(parsed.rejection_counts.values())
-                for reason, count in parsed.rejection_counts.items():
-                    rejection_totals[reason] = rejection_totals.get(reason, 0) + count
-            if not day_rows:
+            day_path = staging / f"cqdx-{day:%Y-%m-%d}.parquet"
+            n_rows = _write_archive_day(client, keys, day_path, rejection_totals)
+            n_objects += len(keys)
+            if not n_rows:
                 print(f"no qualifying rows in archive day {day}", file=stderr)
                 continue
-            frame = dedup_spots(archive_rows_to_frame(day_rows))
-            day_path = staging / f"cqdx-{day:%Y-%m-%d}.parquet"
-            frame.write_parquet(day_path)
-            total_rows += frame.height
+            total_rows += n_rows
             n_days += 1
-            print(f"day {day}: {frame.height} qualifying spots ({len(keys)} objects)", file=stderr)
+            print(f"day {day}: {n_rows} qualifying spots ({len(keys)} objects)", file=stderr)
     except ArchiveAccessError:
         shutil.rmtree(staging, ignore_errors=True)
         print(_ARCHIVE_ACCESS_MSG, file=stderr)
         return 1
     except (OSError, EOFError, zlib.error):
-        # truncated/corrupt gzip raises from parse_archive_object's GzipFile
+        # truncated/corrupt gzip raises from iter_archive_rows' GzipFile
         # (EOFError: truncated stream; zlib.error: corrupt deflate; OSError:
         # BadGzipFile and friends)
         shutil.rmtree(staging, ignore_errors=True)
         print(_ARCHIVE_ACCESS_MSG, file=stderr)
+        return 1
+    except (duckdb.Error, pl.exceptions.PolarsError):
+        shutil.rmtree(staging, ignore_errors=True)
+        print("Error: could not write cqdx backfill Parquet.", file=stderr)
         return 1
 
     if total_rows == 0:
@@ -237,6 +286,7 @@ def run_backfill(
         print(f"rejected rows by reason: {summary}", file=stderr)
     out_dir.parent.mkdir(parents=True, exist_ok=True)
     staging.rename(out_dir)
+    n_rejected = sum(rejection_totals.values())
     print(f"Wrote {total_rows} cqdx spots to {out_dir} ({n_days} day(s), {n_objects} object(s), {n_rejected} rejected).")
     return 0
 

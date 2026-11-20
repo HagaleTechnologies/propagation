@@ -52,6 +52,8 @@ Wrote 120 cqdx spots to data/cqdx-june (1 day, 3 objects, 8 rejected).
   overwritten.
 - Output: one `cqdx-YYYY-MM-DD.parquet` per non-empty archive day, exact
   `SPOT_SCHEMA` types, deduplicated within each archive day.
+- Allow disk space beside the destination for one day's temporary Parquet
+  batches and DuckDB spill files, in addition to the final files.
 - Keep the destination under gitignored `data/` or on operator-controlled
   private storage; never redistribute raw rows.
 

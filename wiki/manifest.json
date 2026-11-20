@@ -1,6 +1,6 @@
 {
-  "generated_at": "2026-11-01T13:22:22Z",
-  "head_commit": "3c69a7b",
+  "generated_at": "2026-11-20T04:26:35Z",
+  "head_commit": "9e55a7b",
   "pages": [
     {
       "hash": "sha256:eebe8dc967e6a0c6fc179da2849d4275b78f6fbd4c785034ffcdf62b5c3545e1",
@@ -326,7 +326,7 @@
       "visibility": "private"
     },
     {
-      "hash": "sha256:1417dce338055f100b286418b18b7bb101e3e045270fd1a89217084c29a528c1",
+      "hash": "sha256:ab20418f5637d6996e7015d7e3862145335d811d112ce51aae19f0d0f003fad4",
       "id": "subsystem-data-pipeline",
       "kind": "subsystem",
       "links": [

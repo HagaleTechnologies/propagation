@@ -51,8 +51,9 @@ not its archive partition date — selects its evaluation month, so the
 evaluator reads every daily file and filters by `ts`. Only automatic
 payload sources (pskreporter/rbn mirrors) are admitted; rows keep archive
 provenance `source='cqdx'` (lowest dedup priority). boto3 sits behind the
-opt-in `cqdx-r2` extra. Credentials, bounded listings and the atomic
-publish rules: docs/cqdx-backfill.md.
+opt-in `cqdx-r2` extra. Spot rows spill to Parquet in batches before
+daily deduplication. See docs/cqdx-backfill.md for the staging disk space
+and credential requirements.
 
 ## Why it is shaped this way
 

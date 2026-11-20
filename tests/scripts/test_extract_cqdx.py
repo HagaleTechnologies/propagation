@@ -14,6 +14,7 @@ import polars as pl
 import pytest
 
 sys.path.insert(0, str(Path(__file__).parent.parent.parent / "scripts"))
+import extract_cqdx  # noqa: E402
 from extract_cqdx import (  # noqa: E402
     _ARCHIVE_ACCESS_MSG,
     _MISSING_CREDS_MSG,
@@ -133,6 +134,46 @@ def test_backfill_writes_shared_schema_from_paginated_r2(tmp_path):
     assert len(fake.lists) >= 3
     match = re.search(r"Wrote (\d+) cqdx spots to .+ \((\d+) day\(s\), (\d+) object\(s\), (\d+) rejected\)", out)
     assert match and match.groups() == ("4", "1", "3", "1"), out
+
+
+def test_backfill_bounds_batches_and_deduplicates_across_objects(tmp_path, monkeypatch):
+    batch_sizes = []
+    to_frame = extract_cqdx.archive_rows_to_frame
+
+    def record_batch(rows):
+        batch_sizes.append(len(rows))
+        return to_frame(rows)
+
+    monkeypatch.setattr(extract_cqdx, "_BATCH_SIZE", 2, raising=False)
+    monkeypatch.setattr(extract_cqdx, "archive_rows_to_frame", record_batch)
+    fake = FakeR2(
+        {
+            "raw/2026-06-01/05/01ARZ3NDEKTSV4RRFFQ69G5FAV.ndjson.gz": _ndjson_object(
+                [
+                    _payload(snr=None),
+                    _payload(dx_call="K2CCC", ts=_TS + 900),
+                    _payload(snr=-5, ts=_TS + 1),
+                ]
+            ),
+            "raw/2026-06-01/06/01ARZ3NDEKTSV4RRFFQ69G5FAW.ndjson.gz": _ndjson_object(
+                [
+                    _payload(snr=-5),
+                    _payload(dx_call="K3CCC", ts=_TS + 1800),
+                ]
+            ),
+        }
+    )
+    code, out, err = _run(fake, tmp_path)
+    assert code == 0, (out, err)
+    assert batch_sizes == [2, 2, 1]
+    files = list((tmp_path / "cqdx-june").iterdir())
+    assert [path.name for path in files] == ["cqdx-2026-06-01.parquet"]
+    frame = pl.read_parquet(files[0])
+    assert frame.schema == pl.DataFrame(schema=SPOT_SCHEMA).schema
+    assert frame["dx_call"].to_list() == ["K1BBB", "K2CCC", "K3CCC"]
+    assert frame["ts"].dt.epoch("s").to_list() == [_TS, _TS + 900, _TS + 1800]
+    assert frame["snr_db"].to_list() == [-5, -10, -10]
+    assert "Wrote 3 cqdx spots" in out
 
 
 def test_backfill_never_fetches_unexpected_keys(tmp_path):
