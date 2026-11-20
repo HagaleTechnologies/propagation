@@ -7,6 +7,8 @@
 - [Why does this repo use monitor-normalized negative sampling?](pages/decision-monitor-normalized-negatives.md) — A spot proves a path was open; the absence of a spot proves almost nothing —
 - [Why is ITURHFProp vendored here rather than calling cqdx's P.533 sidecar?](pages/decision-p533-baseline.md) — The P.533 baseline is implemented by vendoring the ITU's public ITURHFProp C
 - [Why is the prediction surface columnar and integer-quantized?](pages/decision-prediction-contract.md) — The prediction surface contract (v1) uses columnar parallel arrays (not
+- [Where does the RBN-inclusive M3 validation run (and why not in a Catalyst slot)?](pages/decision-rbn-inclusive-validation.md) — PRO-8's second Gherkin scenario (does GBT trained with RBN included still
+- [Why free -g overstates what a Catalyst slot can run (cgroup memory cap)?](pages/gotcha-catalyst-slot-cgroup-memory.md) — `free -g` in a Catalyst slot reports the HOST (125 GB on the class PRO-8's
 - [What will bite you about the Codex gate and Dependabot PRs?](pages/gotcha-codex-gate-and-dependabot.md) — The required check `Codex review clean (gate before expensive downstream
 - [What will bite you about evaluation (blocked CV, full label set)?](pages/gotcha-eval-rules.md) — Three eval rules will produce silently invalid results if violated: (1) random
 - [What will bite you about a leakage audit that only blocklists columns by name?](pages/gotcha-label-leakage-via-nulls.md) — M2's leakage audit (`tests/test_leakage.py`) blocklisted label columns by
@@ -16,4 +18,3 @@
 - [What will bite you about the QA diurnal-ratio checks (1 and 2)?](pages/gotcha-qa-diurnal-checks.md) — QA checks 1 (20m day/night open-rate ratio > 2) and 2 (160m/80m night/day
 - [What will bite you about Serena symbol search and thoughts docs?](pages/gotcha-serena-and-thoughts-tooling.md) — Serena symbol search in this repo is configured by `.serena/project.yml`.
 - [What contract does this repo expose for HF band-opening predictions?](pages/interface-prediction-surface.md) — This repo PRODUCES the `propagation.prediction-surface.v1` contract — a
-- [What's the PR review convergence policy?](../docs/DECISIONS/2026-08-07-pr-review-convergence-policy.md) — P1 findings get fixed every review round; P2-and-lower findings raised after round one are tracked in a follow-up ticket instead of chased inline, so PRs converge instead of oscillating.

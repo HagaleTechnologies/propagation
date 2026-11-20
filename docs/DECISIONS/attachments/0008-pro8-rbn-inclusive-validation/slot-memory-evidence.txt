@@ -1,0 +1,24 @@
+# Catalyst slot memory evidence, read 2026-11-20T04:29Z immediately after the 23m17s kill
+
+$ cat /sys/fs/cgroup/memory.max /sys/fs/cgroup/memory.high
+12884901888
+max
+
+$ cat /sys/fs/cgroup/memory.peak
+12887134208
+
+$ cat /sys/fs/cgroup/memory.events
+low 0
+high 0
+max 31147
+oom 4
+oom_kill 1
+oom_group_kill 0
+
+$ free -g   # HOST view — the slot's cap is the cgroup number above, not this one
+               total        used        free      shared  buff/cache   available
+Mem:             125          10          62           0          53         114
+Swap:              0           0           0
+
+$ nproc
+32

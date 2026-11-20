@@ -2,7 +2,11 @@
 
 ## Status
 
-Accepted.
+Accepted. Outcome recorded in
+[0008](0008-pro8-rbn-inclusive-validation.md): attempt 6 (2026-11-20) was
+OOM-killed by the Catalyst slot's 12 GiB cgroup memory cap before model
+fitting; scenario 2 remains unconfirmed and the "bigger-memory host"
+constraint is confirmed and quantified (>= 32 GB process-available).
 
 ## Context
 
