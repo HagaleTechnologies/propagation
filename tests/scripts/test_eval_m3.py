@@ -771,7 +771,7 @@ def test_acceptance_loader_normalizes_legacy_pskreporter_dtypes(tmp_path):
     psk_dir.mkdir()
     frame = _acc_month_spots("2026-01").filter(pl.col("source") == "pskreporter")
     legacy = frame.with_columns(
-        (pl.col("ts").cast(pl.Int64) * 1000).cast(pl.Datetime("ms", "UTC")).alias("ts"),
+        pl.col("ts").dt.epoch("ms").cast(pl.Datetime("ms", "UTC")).alias("ts"),
         pl.col("freq_hz").cast(pl.Int32), pl.col("snr_db").cast(pl.Int32),
         pl.col("band").str.to_uppercase(), pl.col("mode").str.to_lowercase(),
     )
