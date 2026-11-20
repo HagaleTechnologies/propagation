@@ -10,6 +10,7 @@ import pytest
 sys.path.insert(0, str(Path(__file__).parent.parent.parent / "scripts"))
 from eval_m3 import (  # noqa: E402
     BAND_GROUPS,
+    _assert_rbn_participation,
     _band_group,
     _build_rbn_spots_for_month,
     _download_rbn_month,
@@ -23,9 +24,14 @@ from propagation.data.schema import SPOT_SCHEMA  # noqa: E402
 RBN_FIXTURE = Path(__file__).parent.parent / "fixtures" / "rbn_sample.csv"
 
 _FAKE_LOCATIONS = {
-    "BD8CS": (39.9, 116.4), "BY8DX": (31.2, 121.5), "W1NT": (41.5, -71.3),
-    "K9EI": (41.6, -87.0), "TI7W": (10.0, -84.0), "ND7K": (36.0, -112.0),
-    "N4KS": (33.0, -84.0), "KM3T": (39.0, -76.0),
+    "BD8CS": (39.9, 116.4),
+    "BY8DX": (31.2, 121.5),
+    "W1NT": (41.5, -71.3),
+    "K9EI": (41.6, -87.0),
+    "TI7W": (10.0, -84.0),
+    "ND7K": (36.0, -112.0),
+    "N4KS": (33.0, -84.0),
+    "KM3T": (39.0, -76.0),
 }
 
 
@@ -35,6 +41,7 @@ def _fake_resolver(call: str):
 
 def test_band_group_maps_every_band_to_exactly_one_group():
     from propagation.features.history import BAND_ORDER
+
     seen = set()
     for band in BAND_ORDER:
         group = _band_group(band)
@@ -52,7 +59,9 @@ def test_band_group_rejects_unknown_band():
 def _labels_at(*hours_from_epoch):
     epoch = datetime(2026, 6, 1, 0, 0, tzinfo=timezone.utc)
     ts = [epoch + timedelta(hours=h) for h in hours_from_epoch]
-    return pl.DataFrame({"window_start": ts}, schema_overrides={"window_start": pl.Datetime("us", "UTC")})
+    return pl.DataFrame(
+        {"window_start": ts}, schema_overrides={"window_start": pl.Datetime("us", "UTC")}
+    )
 
 
 def test_enforce_blocked_cv_gap_scales_with_max_horizon():
@@ -76,12 +85,21 @@ class ConstantModel:
 
 def test_write_band_group_reports_writes_one_table_per_group(tmp_path):
     ts = datetime(2026, 6, 15, 6, 0, tzinfo=timezone.utc)
-    labels = pl.DataFrame({
-        "window_start": [ts, ts, ts],
-        "tx_field": ["EM", "EM", "EM"], "rx_field": ["PM", "PM", "PM"],
-        "band": ["20m", "160m", "6m"], "open": [1, 0, 1],
-    }, schema_overrides={"window_start": pl.Datetime("us", "UTC")})
-    models = {"climatology": ConstantModel(0.7), "p533": ConstantModel(0.6), "gbt": ConstantModel(0.5)}
+    labels = pl.DataFrame(
+        {
+            "window_start": [ts, ts, ts],
+            "tx_field": ["EM", "EM", "EM"],
+            "rx_field": ["PM", "PM", "PM"],
+            "band": ["20m", "160m", "6m"],
+            "open": [1, 0, 1],
+        },
+        schema_overrides={"window_start": pl.Datetime("us", "UTC")},
+    )
+    models = {
+        "climatology": ConstantModel(0.7),
+        "p533": ConstantModel(0.6),
+        "gbt": ConstantModel(0.5),
+    }
     results = write_band_group_reports(models, labels, horizon_hours=0.0, out_dir=tmp_path)
     assert set(results) == {"low", "mid", "high"}
     for group in ("low", "mid", "high"):
@@ -97,9 +115,95 @@ def _spot_row(band: str, **overrides) -> dict:
 
 
 def test_merge_band_spots_concats_matching_band():
-    base = pl.DataFrame([_spot_row("20m", source="wsprnet")], schema=SPOT_SCHEMA)
+    # Distinct realistic keys: the merge now runs the shared cross-source
+    # dedup, under which the old all-null-key fixture would falsely collapse.
+    ts = datetime(2024, 5, 11, 12, 0, tzinfo=timezone.utc)
+    base = pl.DataFrame(
+        [_spot_row("20m", source="wsprnet", dx_call="K1AA", de_call="DL2BB", mode="WSPR", ts=ts)],
+        schema=SPOT_SCHEMA,
+    )
     extra = pl.DataFrame(
-        [_spot_row("20m", source="rbn"), _spot_row("40m", source="rbn")], schema=SPOT_SCHEMA
+        [
+            _spot_row("20m", source="rbn", dx_call="K1AA", de_call="F5CC", mode="CW", ts=ts),
+            _spot_row("40m", source="rbn", dx_call="K1AA", de_call="F5CC", mode="CW", ts=ts),
+        ],
+        schema=SPOT_SCHEMA,
+    )
+    merged = _merge_band_spots(base, extra, band="20m")
+    assert merged.height == 2
+    assert set(merged["source"].to_list()) == {"wsprnet", "rbn"}
+
+
+def test_merge_band_spots_dedups_cross_source_duplicates():
+    # Same (dx_call, de_call, band, mode, 15-min window) from both sources;
+    # the RBN row's snr_db is HIGHER, but docs/SPEC-labeling.md sec 1's
+    # source priority (wsprnet > rbn) must win at the merge seam.
+    ts = datetime(2024, 5, 11, 12, 3, tzinfo=timezone.utc)
+    base = pl.DataFrame(
+        [
+            _spot_row(
+                "20m",
+                source="wsprnet",
+                dx_call="W1ABC",
+                de_call="G3XYZ",
+                mode="FT8",
+                ts=ts,
+                snr_db=-20,
+            )
+        ],
+        schema=SPOT_SCHEMA,
+    )
+    extra = pl.DataFrame(
+        [
+            _spot_row(
+                "20m",
+                source="rbn",
+                dx_call="W1ABC",
+                de_call="G3XYZ",
+                mode="FT8",
+                ts=ts + timedelta(minutes=8),
+                snr_db=10,
+            )
+        ],
+        schema=SPOT_SCHEMA,
+    )
+    merged = _merge_band_spots(base, extra, band="20m")
+    assert merged.height == 1
+    assert merged["source"].to_list() == ["wsprnet"]
+
+
+def test_merge_band_spots_keeps_cross_source_rows_with_distinct_modes():
+    # WSPRnet modes (WSPR/FST4W) and RBN modes (CW/RTTY) never collide in
+    # the dedup key (dx_call, de_call, band, mode, window), so same-pair
+    # spots with distinct modes both survive the cross-source dedup.
+    ts = datetime(2024, 5, 11, 12, 0, tzinfo=timezone.utc)
+    base = pl.DataFrame(
+        [
+            _spot_row(
+                "20m",
+                source="wsprnet",
+                dx_call="W1ABC",
+                de_call="G3XYZ",
+                mode="WSPR",
+                ts=ts,
+                snr_db=-20,
+            )
+        ],
+        schema=SPOT_SCHEMA,
+    )
+    extra = pl.DataFrame(
+        [
+            _spot_row(
+                "20m",
+                source="rbn",
+                dx_call="W1ABC",
+                de_call="G3XYZ",
+                mode="CW",
+                ts=ts + timedelta(minutes=10),
+                snr_db=10,
+            )
+        ],
+        schema=SPOT_SCHEMA,
     )
     merged = _merge_band_spots(base, extra, band="20m")
     assert merged.height == 2
@@ -164,7 +268,9 @@ def test_build_rbn_spots_for_month_aggregates_across_days_and_filters_band(tmp_p
             zf.writestr(f"202401{day:02d}.csv", RBN_FIXTURE.read_text())
     monkeypatch.setattr(eval_m3, "download_rbn_archive", _not_found)  # remaining days 404
 
-    spots = _build_rbn_spots_for_month("2024-01", ["20m"], tmp_path, resolve_location=_fake_resolver)
+    spots = _build_rbn_spots_for_month(
+        "2024-01", ["20m"], tmp_path, resolve_location=_fake_resolver
+    )
     # 4 qualifying 20m spots per day per test_rbn.py's fixture-derived count, x 2 days
     assert spots.height == 8
     assert set(spots["band"].unique().to_list()) == {"20m"}
@@ -175,6 +281,26 @@ def test_build_rbn_spots_for_month_empty_when_no_archives_available(tmp_path, mo
     import eval_m3
 
     monkeypatch.setattr(eval_m3, "download_rbn_archive", _not_found)
-    spots = _build_rbn_spots_for_month("2024-01", ["20m"], tmp_path, resolve_location=_fake_resolver)
+    spots = _build_rbn_spots_for_month(
+        "2024-01", ["20m"], tmp_path, resolve_location=_fake_resolver
+    )
     assert spots.height == 0
     assert spots.schema == pl.DataFrame(schema=SPOT_SCHEMA).schema
+
+
+def test_assert_rbn_participation_raises_when_all_months_empty():
+    empty = pl.DataFrame(schema=SPOT_SCHEMA)
+    with pytest.raises(RuntimeError, match="include-rbn"):
+        _assert_rbn_participation({"2024-01": empty, "2024-05": empty}, bands=["20m"])
+
+
+def test_assert_rbn_participation_passes_when_any_month_populated():
+    ts = datetime(2024, 5, 11, 12, 0, tzinfo=timezone.utc)
+    empty = pl.DataFrame(schema=SPOT_SCHEMA)
+    populated = pl.DataFrame(
+        [_spot_row("20m", source="rbn", dx_call="W1ABC", de_call="KM3T", mode="CW", ts=ts)],
+        schema=SPOT_SCHEMA,
+    )
+    # A single populated month among several is a printed upstream gap, not a
+    # masquerade -- no raise.
+    _assert_rbn_participation({"2024-01": empty, "2024-05": populated}, bands=["20m"])

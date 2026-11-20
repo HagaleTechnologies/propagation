@@ -20,6 +20,7 @@ Storm/quiet slicing and the full 11-band x 6-horizon historical sweep are
 out of scope for this script (spec sec 7) -- this produces one headline
 table per (band group, horizon) for whatever bands/horizons are requested.
 """
+
 from __future__ import annotations
 
 import argparse
@@ -30,6 +31,7 @@ from pathlib import Path
 import httpx
 import polars as pl
 
+from propagation.data.dedup import dedup_spots
 from propagation.data.rbn import LocationResolver, download_rbn_archive, extract_rbn
 from propagation.data.schema import SPOT_SCHEMA
 from propagation.data.spaceweather import fetch_omni2_range
@@ -59,16 +61,44 @@ def _band_group(band: str) -> str:
     raise ValueError(f"band {band!r} not in any BAND_GROUPS entry")
 
 
-def _merge_band_spots(spots: pl.DataFrame, extra_spots: pl.DataFrame | None, band: str) -> pl.DataFrame:
+def _merge_band_spots(
+    spots: pl.DataFrame, extra_spots: pl.DataFrame | None, band: str
+) -> pl.DataFrame:
     """Fold in `extra_spots` (e.g. RBN, PRO-8) for one band, if any exist for
-    it. Split out as its own pure function so the merge logic is testable
-    without a real WSPRnet archive fixture."""
+    it, then re-apply the shared cross-source dedup_spots so one physical
+    spot reported by two sources in the same (dx_call, de_call, band, mode,
+    15-min window) key is counted once, keeping the higher-priority source
+    row (docs/SPEC-labeling.md sec 1: wsprnet > rbn > pskreporter > cqdx).
+    Split out as its own pure function so the merge logic is testable
+    without a real WSPRnet archive fixture.
+
+    Today this cross-source dedup is a structural no-op for WSPRnet+RBN --
+    WSPRnet modes (WSPR/FST4W) and RBN modes (CW/RTTY) never collide in the
+    dedup key -- but the seam stays correct for sources whose modes do
+    overlap on both sides (PRO-10's pskreporter/cqdx FT8)."""
     if extra_spots is None or extra_spots.height == 0:
         return spots
     band_extra = extra_spots.filter(pl.col("band") == band)
     if band_extra.height == 0:
         return spots
-    return pl.concat([spots, band_extra], how="vertical_relaxed")
+    return dedup_spots(pl.concat([spots, band_extra], how="vertical_relaxed"))
+
+
+def _assert_rbn_participation(rbn_by_month: dict[str, pl.DataFrame], bands: list[str]) -> None:
+    """PRO-8: `--include-rbn` must not silently degrade into a WSPRnet-only
+    run. RBN archive downloads are best-effort per day (_download_rbn_month
+    skips missing days), so an empty month is possible; empty across EVERY
+    requested train/eval month means zero RBN evidence entered the run --
+    fail loud before any label building or model fitting instead of
+    producing numbers that would read as an RBN-inclusive result."""
+    empty_months = sorted(ym for ym, frame in rbn_by_month.items() if frame.height == 0)
+    if rbn_by_month and len(empty_months) == len(rbn_by_month):
+        raise RuntimeError(
+            f"--include-rbn was set but zero qualifying RBN spots were extracted for "
+            f"every requested month ({', '.join(empty_months)}; bands={bands}) -- refusing "
+            f"to continue as a WSPRnet-only run. Check data.reversebeacon.net archive "
+            f"availability and the rbn-*.zip day files under --data-dir's raw/ directory."
+        )
 
 
 def _build_labels_for_month_all_bands(
@@ -85,7 +115,9 @@ def _build_labels_for_month_all_bands(
 
 
 def _build_labels_for_months(
-    archives: dict[str, Path], bands: list[str], extra_spots_by_month: dict[str, pl.DataFrame] | None = None
+    archives: dict[str, Path],
+    bands: list[str],
+    extra_spots_by_month: dict[str, pl.DataFrame] | None = None,
 ) -> pl.DataFrame:
     return pl.concat(
         [
@@ -168,7 +200,10 @@ def enforce_blocked_cv_gap(
 
 
 def write_band_group_reports(
-    models: dict[str, object], labels: pl.DataFrame, horizon_hours: float, out_dir: Path,
+    models: dict[str, object],
+    labels: pl.DataFrame,
+    horizon_hours: float,
+    out_dir: Path,
 ) -> dict[str, dict[str, dict]]:
     """Same pattern as scripts/eval_m2.py::write_three_model_slice_reports,
     sliced by BAND_GROUPS instead of storm/quiet. `labels` must carry `open`
@@ -187,7 +222,9 @@ def write_band_group_reports(
         for model_name, model in models.items():
             pred = model.predict(sl).drop_nulls("p_open")
             if pred.height == 0:
-                print(f"{model_name} abstained on all {sl.height} rows in group {group!r} h={horizon_hours} — skipping")
+                print(
+                    f"{model_name} abstained on all {sl.height} rows in group {group!r} h={horizon_hours} — skipping"
+                )
                 continue
             results[group][model_name] = write_headline_report(
                 y_true=pred["open"].cast(pl.Float64).to_numpy(),
@@ -201,16 +238,21 @@ def write_band_group_reports(
 def main() -> None:
     ap = argparse.ArgumentParser(description="M3 band/horizon expansion headline eval")
     ap.add_argument("--bands", nargs="+", required=True)
-    ap.add_argument("--horizons", nargs="+", type=float, required=True, help="hours, e.g. 0 1 3 6 12 24")
+    ap.add_argument(
+        "--horizons", nargs="+", type=float, required=True, help="hours, e.g. 0 1 3 6 12 24"
+    )
     ap.add_argument("--train-months", nargs="+", required=True, help="YYYY-MM")
     ap.add_argument("--eval-months", nargs="+", required=True, help="YYYY-MM, held-out")
     ap.add_argument("--data-dir", type=Path, default=Path("data"))
     ap.add_argument(
-        "--include-rbn", action="store_true",
+        "--include-rbn",
+        action="store_true",
         help="merge RBN (CW ground truth) spots into WSPRnet before building labels (PRO-8)",
     )
     ap.add_argument(
-        "--p533-workers", type=int, default=None,
+        "--p533-workers",
+        type=int,
+        default=None,
         help="P533Model's ThreadPoolExecutor size (each worker forks an iturhfprop subprocess); "
         "defaults to os.cpu_count() (P533Model's own default) -- pass a smaller number to reduce "
         "CPU/memory contention on a machine running other concurrent load (see ADR 0006).",
@@ -245,6 +287,7 @@ def main() -> None:
             print(f"extracting RBN spots for {ym}...")
             rbn_by_month[ym] = _build_rbn_spots_for_month(ym, args.bands, raw_dir)
             print(f"  {rbn_by_month[ym].height} qualifying RBN spots for {ym}")
+        _assert_rbn_participation(rbn_by_month, args.bands)
 
     train_labels = _build_labels_for_months(train_archives, args.bands, rbn_by_month)
     eval_labels = _build_labels_for_months(eval_archives, args.bands, rbn_by_month)
@@ -253,7 +296,9 @@ def main() -> None:
     enforce_blocked_cv_gap(train_labels, eval_labels, max_horizon_hours=max_horizon)
 
     cache_dir = args.data_dir / "cache"
-    all_years = sorted({int(ym.split("-")[0]) for ym in list(args.train_months) + list(args.eval_months)})
+    all_years = sorted(
+        {int(ym.split("-")[0]) for ym in list(args.train_months) + list(args.eval_months)}
+    )
     omni = fetch_omni2_range(all_years[0], all_years[-1], cache_dir=cache_dir)
     eval_month_keys = list(args.eval_months)
 
