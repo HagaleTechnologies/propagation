@@ -148,11 +148,15 @@ optional:
 - `extract-cqdx` (**optional, private**): reads Tony's R2 archive
   (`raw/YYYY-MM-DD/HH/{ulid}.ndjson.gz`, gzipped NDJSON of camelCase spot
   records: `timestamp`, `frequency`, `band`, `mode`, `dxCall`, `dxGrid`,
-  `dxLat`/`dxLon`, `deCall`, `deGrid`, `deLat`/`deLon`, `snr`, `source`, …) via
-  the S3-compatible R2 API. Gives dense multi-mode PSKReporter+RBN+cluster
-  history predating the public MQTT subscriber. **Nothing downstream may know
-  which extractor produced a row** beyond the `source` column; published
-  results must reproduce from public sources alone.
+  `dxLat`/`dxLon`, `deCall`, `deGrid`, `deLat`/`deLon`, `snr`, `source`, …)
+  via the S3-compatible R2 API; automatic PSKReporter/RBN payload mirrors
+  only (manual and cluster rows filtered), behind the opt-in `cqdx-r2` extra
+  (`scripts/extract_cqdx.py` — see docs/cqdx-backfill.md for credentials,
+  bounded listings and the paired public/cqdx acceptance comparison in
+  `scripts/eval_m3.py --acceptance-pskreporter-dir`). Gives dense multi-mode
+  PSKReporter+RBN history predating the public MQTT subscriber. **Nothing
+  downstream may know which extractor produced a row** beyond the `source`
+  column; published results must reproduce from public sources alone.
 
 ### 3.3 Space weather
 

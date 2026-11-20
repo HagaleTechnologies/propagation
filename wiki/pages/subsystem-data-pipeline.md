@@ -45,6 +45,15 @@ ARCHITECTURE.md §3.1 for the full schema table.
 source priority `wsprnet > rbn > pskreporter > cqdx`. Applied before labeling
 and before any spot-count feature. See docs/SPEC-labeling.md §1.
 
+**cqdx R2 backfill gotchas** (PRO-10): the archive partitions by UTC day
+(`raw/YYYY-MM-DD/HH/{ulid}.ndjson.gz`) but a spot's OBSERVATION timestamp —
+not its archive partition date — selects its evaluation month, so the
+evaluator reads every daily file and filters by `ts`. Only automatic
+payload sources (pskreporter/rbn mirrors) are admitted; rows keep archive
+provenance `source='cqdx'` (lowest dedup priority). boto3 sits behind the
+opt-in `cqdx-r2` extra. Credentials, bounded listings and the atomic
+publish rules: docs/cqdx-backfill.md.
+
 ## Why it is shaped this way
 
 The pluggable interface exists to enforce the open/closed boundary —
