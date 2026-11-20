@@ -216,6 +216,25 @@ def test_backfill_read_failure_does_not_publish_partial_output(tmp_path):
     ]
 
 
+def test_backfill_truncated_or_corrupt_gzip_aborts_cleanly(tmp_path):
+    # gzip integrity failures raise from parse_archive_object (EOFError for a
+    # truncated stream, zlib.error for corrupt deflate); neither is an OSError,
+    # but the documented contract still applies: exit 1, print the archive
+    # access error, publish nothing, leave no staging directory behind.
+    good = _ndjson_object([_payload(dx_call="K1BBB")])
+    key = "raw/2026-06-01/05/01ARZ3NDEKTSV4RRFFQ69G5FAV.ndjson.gz"
+    for name, body in (
+        ("truncated", good[: len(good) - 8]),
+        ("corrupt", good[:10] + b"\xff\xff\xff\xff\xff\xff\xff\xff" + good[18:]),
+    ):
+        fake = FakeR2({key: body})
+        code, out, err = _run(fake, tmp_path, out_name=f"cqdx-{name}")
+        assert code == 1, (name, out, err)
+        assert _ARCHIVE_ACCESS_MSG in err, (name, err)
+        assert not (tmp_path / f"cqdx-{name}").exists()
+        assert not (tmp_path / f".cqdx-{name}.staging").exists()
+
+
 def test_backfill_empty_range_exits_nonzero_and_publishes_nothing(tmp_path):
     fake = FakeR2({})  # archive has nothing for the requested day
     code, out, err = _run(fake, tmp_path)

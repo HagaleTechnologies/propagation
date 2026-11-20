@@ -26,6 +26,7 @@ import os
 import re
 import shutil
 import sys
+import zlib
 from pathlib import Path
 from typing import Callable
 
@@ -218,8 +219,10 @@ def run_backfill(
         shutil.rmtree(staging, ignore_errors=True)
         print(_ARCHIVE_ACCESS_MSG, file=stderr)
         return 1
-    except OSError:
+    except (OSError, EOFError, zlib.error):
         # truncated/corrupt gzip raises from parse_archive_object's GzipFile
+        # (EOFError: truncated stream; zlib.error: corrupt deflate; OSError:
+        # BadGzipFile and friends)
         shutil.rmtree(staging, ignore_errors=True)
         print(_ARCHIVE_ACCESS_MSG, file=stderr)
         return 1
