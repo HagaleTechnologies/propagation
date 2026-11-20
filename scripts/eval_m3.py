@@ -297,18 +297,24 @@ def load_pskreporter_month(psk_dir: Path, ym: str, band: str) -> pl.DataFrame:
         file_ym = f"{path.name[12:16]}-{path.name[17:19]}"
         if file_ym != ym:
             continue
-        df = pl.read_parquet(path)
-        missing = [c for c in SPOT_SCHEMA if c not in df.columns]
+        lf = pl.scan_parquet(path)
+        missing = [c for c in SPOT_SCHEMA if c not in lf.collect_schema().names()]
         if missing:
             raise ValueError(f"{path.name}: missing shared-schema columns {missing}")
-        df = _normalize_spot_frame(df)
+        # lazy scan, projected to the shared columns before collecting so an
+        # oversized stray file never lands whole in memory; provenance is
+        # validated on EVERY row of the file (pre-filter), then month/band
+        # selection runs on the normalized frame
+        df = _normalize_spot_frame(lf.select(list(SPOT_SCHEMA)).collect())
         foreign = df.filter(pl.col("source") != "pskreporter")
         if foreign.height:
             raise ValueError(
                 f"{path.name}: expected only source='pskreporter' rows, found "
                 f"{foreign.height} foreign-source row(s) -- refusing mislabeled input"
             )
-        frames.append(df)
+        frames.append(df.filter(
+            (pl.col("ts") >= start) & (pl.col("ts") < end) & (pl.col("band") == band)
+        ))
     month = pl.concat(frames, how="vertical_relaxed") if frames else pl.DataFrame(schema=SPOT_SCHEMA)
     return month.filter(
         (pl.col("ts") >= start) & (pl.col("ts") < end) & (pl.col("band") == band)
@@ -328,18 +334,20 @@ def load_cqdx_month(cqdx_dir: Path, ym: str, band: str) -> pl.DataFrame:
         if not _CQDX_FILE_RE.match(path.name):
             print(f"skipping non-backfill file {path.name}", file=sys.stderr)
             continue
-        df = pl.read_parquet(path)
-        missing = [c for c in SPOT_SCHEMA if c not in df.columns]
+        lf = pl.scan_parquet(path)
+        missing = [c for c in SPOT_SCHEMA if c not in lf.collect_schema().names()]
         if missing:
             raise ValueError(f"{path.name}: missing shared-schema columns {missing}")
-        df = _normalize_spot_frame(df)
+        df = _normalize_spot_frame(lf.select(list(SPOT_SCHEMA)).collect())
         foreign = df.filter(pl.col("source") != "cqdx")
         if foreign.height:
             raise ValueError(
                 f"{path.name}: expected only source='cqdx' rows, found "
                 f"{foreign.height} foreign-source row(s) -- refusing mislabeled input"
             )
-        frames.append(df)
+        frames.append(df.filter(
+            (pl.col("ts") >= start) & (pl.col("ts") < end) & (pl.col("band") == band)
+        ))
     month = pl.concat(frames, how="vertical_relaxed") if frames else pl.DataFrame(schema=SPOT_SCHEMA)
     return month.filter(
         (pl.col("ts") >= start) & (pl.col("ts") < end) & (pl.col("band") == band)

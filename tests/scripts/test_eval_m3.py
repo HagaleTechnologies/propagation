@@ -762,3 +762,29 @@ def test_default_eval_preserves_existing_reports_and_does_not_discover_optional_
     assert table.exists()
     assert not (data_dir / "reports" / "m3" / "acceptance").exists()
     assert "wrote" in out.getvalue()
+
+
+def test_acceptance_loader_normalizes_legacy_pskreporter_dtypes(tmp_path):
+    # older accumulator output: ms-precision timestamps, Int32 freq/snr --
+    # compatible legacy dtypes the acceptance loader must normalize
+    psk_dir = tmp_path / "legacy"
+    psk_dir.mkdir()
+    frame = _acc_month_spots("2026-01").filter(pl.col("source") == "pskreporter")
+    legacy = frame.with_columns(
+        (pl.col("ts").cast(pl.Int64) * 1000).cast(pl.Datetime("ms", "UTC")).alias("ts"),
+        pl.col("freq_hz").cast(pl.Int32), pl.col("snr_db").cast(pl.Int32),
+        pl.col("band").str.to_uppercase(), pl.col("mode").str.to_lowercase(),
+    )
+    legacy.write_parquet(psk_dir / "pskreporter-2026-01-02T00.parquet")
+    loaded = load_pskreporter_month(psk_dir, "2026-01", "20m")
+    assert loaded.height == frame.height
+    assert loaded.schema == pl.DataFrame(schema=SPOT_SCHEMA).schema
+    assert set(loaded["band"].unique().to_list()) == {"20m"}
+    assert set(loaded["mode"].unique().to_list()) == {"FT8"}
+
+    # a file MISSING shared-schema columns is not a compatible legacy shape
+    broken_dir = tmp_path / "broken"
+    broken_dir.mkdir()
+    frame.drop("dx_field", "de_field").write_parquet(broken_dir / "pskreporter-2026-01-02T00.parquet")
+    with pytest.raises(ValueError, match="missing shared-schema columns"):
+        load_pskreporter_month(broken_dir, "2026-01", "20m")
