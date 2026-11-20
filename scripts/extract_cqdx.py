@@ -65,10 +65,12 @@ def _r2_endpoint_url(account_id: str) -> str:
 
 def _validate_account_id(account_id: str) -> str:
     if not _ACCOUNT_ID_RE.match(account_id or ""):
-        raise SystemExit(
+        print(
             "Error: --account-id must be exactly 32 lowercase hex characters "
-            "(the Cloudflare R2 account ID)."
+            "(the Cloudflare R2 account ID).",
+            file=sys.stderr,
         )
+        raise SystemExit(2)
     return account_id
 
 
@@ -178,8 +180,12 @@ def run_backfill(
 
     try:
         client = client_factory()
+    except SystemExit:
+        raise
     except Exception as exc:
-        raise ArchiveAccessError(str(exc)) from exc
+        print(_ARCHIVE_ACCESS_MSG, file=stderr)
+        print(f"client creation failed: {type(exc).__name__}", file=stderr)
+        return 1
 
     total_rows = 0
     n_days = 0

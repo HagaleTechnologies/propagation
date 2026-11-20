@@ -172,31 +172,30 @@ def parse_archive_payload(payload: dict) -> tuple[dict | None, str | None]:
 
 
 def parse_archive_object(data: bytes) -> ArchiveDayParseResult:
-    """Decode one `raw/.../{ulid}.ndjson.gz` object body: gzip NDJSON, one
-    line at a time. Malformed JSON lines and non-admitted payload sources
-    count as rejections; a gzip integrity failure raises (the caller aborts
-    the whole extraction -- a truncated object must never publish a
-    silently-partial day)."""
+    """Decode one `raw/.../{ulid}.ndjson.gz` object body: gzip NDJSON,
+    decoded one NDJSON line at a time. Malformed JSON lines
+    and non-admitted payload sources count as rejections; a gzip integrity
+    failure raises (the caller aborts the whole extraction -- a truncated
+    object must never publish a silently-partial day)."""
     result = ArchiveDayParseResult()
     with gzip.GzipFile(fileobj=io.BytesIO(data)) as gz:
-        raw = gz.read()
-    for line in raw.splitlines():
-        if not line.strip():
-            continue
-        try:
-            payload = json.loads(line)
-        except (json.JSONDecodeError, UnicodeDecodeError):
-            result.rejection_counts["malformed_json"] = (
-                result.rejection_counts.get("malformed_json", 0) + 1
-            )
-            continue
-        row, reason = parse_archive_payload(payload)
-        if row is None:
-            result.rejection_counts[reason or "unknown"] = (
-                result.rejection_counts.get(reason or "unknown", 0) + 1
-            )
-            continue
-        result.rows.append(row)
+        for line in gz:  # decoded one NDJSON line at a time, never buffered whole
+            if not line.strip():
+                continue
+            try:
+                payload = json.loads(line)
+            except (json.JSONDecodeError, UnicodeDecodeError):
+                result.rejection_counts["malformed_json"] = (
+                    result.rejection_counts.get("malformed_json", 0) + 1
+                )
+                continue
+            row, reason = parse_archive_payload(payload)
+            if row is None:
+                result.rejection_counts[reason or "unknown"] = (
+                    result.rejection_counts.get(reason or "unknown", 0) + 1
+                )
+                continue
+            result.rows.append(row)
     return result
 
 

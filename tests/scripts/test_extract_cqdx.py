@@ -1,6 +1,7 @@
 """PRO-10 cqdx R2 backfill command tests (AC1 pagination, AC2 key bounds,
 AC3 credentials + atomic publish). Exercises the real command with a fake
 S3 boundary: paging, gzip parsing and the Parquet writer are the real ones."""
+import contextlib
 import datetime as dt
 import gzip
 import io
@@ -89,8 +90,6 @@ class FakeR2:
 
 def _run(fake, tmp_path, *, creds=_CREDS, start="2026-06-01", end="2026-06-02",
          out_name="cqdx-june", account=GOOD_ACCOUNT):
-    import contextlib
-
     stdout, stderr = io.StringIO(), io.StringIO()
     with contextlib.redirect_stdout(stdout), contextlib.redirect_stderr(stderr):
         code = run_backfill(
@@ -232,5 +231,14 @@ def test_backfill_refuses_existing_snapshot_and_bad_account(tmp_path):
     code, _, err = _run(fake, tmp_path)
     assert code == 2 and "refusing to overwrite" in err
 
-    with pytest.raises(SystemExit, match="account-id"):
-        _run(FakeR2(objects), tmp_path, account="not-hex", out_name="other")
+    with pytest.raises(SystemExit) as excinfo, contextlib.redirect_stderr(io.StringIO()) as err:
+        run_backfill(
+            account_id="not-hex",
+            start_date=dt.date(2026, 6, 1),
+            end_date=dt.date(2026, 6, 2),
+            out_dir=tmp_path / "other",
+            credentials=_CREDS,
+            client_factory=lambda: FakeR2(objects),
+        )
+    assert excinfo.value.code == 2
+    assert "account-id" in err.getvalue()

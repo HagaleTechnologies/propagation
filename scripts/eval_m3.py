@@ -439,10 +439,6 @@ def _write_acceptance_report(report: dict, path: Path) -> None:
     os.replace(tmp, path)  # atomic: a completed run replaces the old report
 
 
-def _spot_source_counts(spots: pl.DataFrame) -> dict[str, int]:
-    return {s: int((spots["source"] == s).sum()) for s in (*PUBLIC_SOURCES, "cqdx")}
-
-
 def _dedup_month_spots(frames: list[pl.DataFrame]) -> pl.DataFrame:
     nonempty = [f for f in frames if f.height]
     if not nonempty:
