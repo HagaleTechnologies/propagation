@@ -59,3 +59,10 @@ Normative rules (ARCHITECTURE.md §6, docs/SPEC-labeling.md §6):
   inconclusive storm-vs-quiet comparison. A real event (checked against
   `propagation.eval.stratify.fetch_definitive_kp()` beforehand) showed the
   expected result clearly. See docs/DECISIONS/0002.
+- **Fixed holdout for paired comparisons** (PRO-10): when scoring a public
+  fit against an R2-augmented fit, both arms must see the SAME evaluation
+  cohort — same keys, labels and features — and private rows may enter
+  TRAINING only. `scripts/eval_m3.py --acceptance-pskreporter-dir` enforces
+  this (cohort SHA-256 in the report, augmented arm refit on training-only
+  augmentation, full-precision paired Brier delta). Freeze the split months
+  before scoring; never let the private arm change the labeled population.

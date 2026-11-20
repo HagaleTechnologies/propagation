@@ -17,6 +17,12 @@ dependencies = [
     "paho-mqtt>=2.1",
 ]
 
+[project.optional-dependencies]
+# PRO-10: boto3 is only needed by scripts/extract_cqdx.py's live R2 path.
+# The default dependency set (and every public-source evaluation) installs
+# without it: `uv run --extra cqdx-r2 ...` opts into the private accelerant.
+cqdx-r2 = ["boto3>=1.35"]
+
 [project.scripts]
 build-p533 = "propagation.models.p533_build:main"
 
